@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+app/__init__.py
+app/config.py
+app/events.py
+app/main.py
+codex_voiceai.egg-info/PKG-INFO
+codex_voiceai.egg-info/SOURCES.txt
+codex_voiceai.egg-info/dependency_links.txt
+codex_voiceai.egg-info/requires.txt
+codex_voiceai.egg-info/top_level.txt
+tests/test_phase1_app_shell.py

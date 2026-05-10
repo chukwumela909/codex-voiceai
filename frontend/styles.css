@@ -1,0 +1,942 @@
+/* ============================================================
+   Codex Voice Agent — phase 6.2
+   Live-diagnostics theater · glass chat tiles bottom-right ·
+   particle-aura orb FAB at bottom-right.
+============================================================ */
+
+:root {
+  /* — Color tokens — */
+  --primary: #292524;
+  --primary-active: #0c0a09;
+  --ink: #0c0a09;
+  --body: #4e4e4e;
+  --body-strong: #292524;
+  --muted: #777169;
+  --muted-soft: #a8a29e;
+  --hairline: #e7e5e4;
+  --hairline-soft: #f0efed;
+  --hairline-strong: #d6d3d1;
+  --canvas: #f5f5f5;
+  --canvas-soft: #fafafa;
+  --canvas-deep: #0c0a09;
+  --surface-card: #ffffff;
+  --surface-strong: #f0efed;
+  --surface-dark: #0c0a09;
+  --surface-dark-elevated: #1c1917;
+  --on-primary: #ffffff;
+  --on-dark: #ffffff;
+  --on-dark-soft: #a8a29e;
+
+  --gradient-mint: #a7e5d3;
+  --gradient-peach: #f4c5a8;
+  --gradient-lavender: #c8b8e0;
+  --gradient-sky: #a8c8e8;
+  --gradient-rose: #e8b8c4;
+
+  --semantic-error: #dc2626;
+  --semantic-success: #16a34a;
+
+  /* — Spacing — */
+  --xxs: 4px;
+  --xs: 8px;
+  --sm: 12px;
+  --base: 16px;
+  --md: 20px;
+  --lg: 24px;
+  --xl: 32px;
+  --xxl: 48px;
+  --section: 96px;
+
+  /* — Radii — */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-xxl: 24px;
+  --r-pill: 9999px;
+
+  /* — Type — */
+  --font-display: "EB Garamond", "Times New Roman", serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+
+  /* — Live state (animated by JS) — */
+  --mic-level: 0;
+  --orb-pulse: 0;
+  --orb-stop-1: var(--gradient-mint);
+  --orb-stop-2: var(--gradient-sky);
+  --orb-stop-3: var(--gradient-lavender);
+  --orb-stop-4: var(--gradient-peach);
+
+  /* — Layout — */
+  --max-content: 1180px;
+  --topbar-h: 64px;
+  --fab-size: clamp(96px, 11vw, 120px);
+  --orb-canvas-bleed: 60%;          /* how far the canvas extends past the FAB */
+  --dock-h: calc(var(--fab-size) + 56px);  /* fab + label + gap */
+  --dock-pad: var(--lg);
+
+  color-scheme: light;
+}
+
+/* — Reset — */
+*, *::before, *::after { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+
+body {
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0.16px;
+  color: var(--ink);
+  background: var(--canvas);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow-x: hidden;
+}
+
+/* Atmospheric base */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: -1;
+  background:
+    radial-gradient(50% 40% at 14% 18%, color-mix(in oklab, var(--orb-stop-1) 22%, transparent), transparent 70%),
+    radial-gradient(40% 36% at 86% 22%, color-mix(in oklab, var(--orb-stop-3) 22%, transparent), transparent 72%),
+    radial-gradient(60% 44% at 50% 96%, color-mix(in oklab, var(--orb-stop-2) 18%, transparent), transparent 70%);
+  filter: blur(40px) saturate(110%);
+  opacity: 0.95;
+  pointer-events: none;
+  transition: background 800ms ease;
+}
+
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+a { color: inherit; text-decoration: none; }
+::selection { background: var(--ink); color: var(--on-primary); }
+
+/* ============================================================
+   Glass
+============================================================ */
+
+.glass {
+  background: color-mix(in oklab, var(--surface-card) 62%, transparent);
+  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border: 1px solid color-mix(in oklab, var(--hairline) 70%, transparent);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.6) inset,
+    0 8px 32px -10px rgba(0, 0, 0, 0.10),
+    0 1px 1px rgba(0, 0, 0, 0.03);
+}
+
+/* ============================================================
+   Top bar
+============================================================ */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lg);
+  height: var(--topbar-h);
+  padding: 0 clamp(var(--base), 4vw, var(--xl));
+  background: color-mix(in oklab, var(--canvas) 80%, transparent);
+  backdrop-filter: saturate(140%) blur(14px);
+  -webkit-backdrop-filter: saturate(140%) blur(14px);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+}
+
+.wordmark__mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 30%, var(--gradient-mint), transparent 60%),
+    radial-gradient(circle at 70% 70%, var(--gradient-peach), transparent 60%),
+    radial-gradient(circle at 50% 50%, var(--gradient-lavender), transparent 70%),
+    var(--canvas-soft);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+.topbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--xs);
+}
+
+/* ============================================================
+   Chips
+============================================================ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xs);
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.96px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background 240ms ease, color 240ms ease;
+}
+
+.chip--state {
+  background: color-mix(in oklab, var(--surface-card) 70%, transparent);
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+}
+
+.chip--ghost {
+  background: color-mix(in oklab, var(--surface-card) 50%, transparent);
+  border: 1px solid var(--hairline);
+  text-transform: none;
+  letter-spacing: 0.16px;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--body);
+  padding: 6px 12px 6px 14px;
+}
+
+.chip__caption {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.96px;
+  font-weight: 600;
+}
+
+.chip__value {
+  color: var(--ink);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted-soft);
+  transition: background 240ms ease, box-shadow 320ms ease;
+}
+
+.chip[data-state="connected"] .chip__dot,
+.chip[data-state="client_ready"] .chip__dot,
+.chip[data-state="transcriber_connected"] .chip__dot,
+.chip[data-state="listening"] .chip__dot,
+.chip[data-state="hearing"] .chip__dot,
+.chip[data-state="thinking"] .chip__dot,
+.chip[data-state="speaking"] .chip__dot {
+  background: var(--semantic-success);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--semantic-success) 16%, transparent);
+}
+
+.chip[data-state="connecting"] .chip__dot {
+  background: var(--gradient-sky);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+.chip[data-state="error"] .chip__dot { background: var(--semantic-error); }
+
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.4); opacity: 0.6; }
+}
+
+/* ============================================================
+   Theater — live diagnostics centerpiece
+============================================================ */
+
+.theater {
+  flex: 1;
+  width: 100%;
+  max-width: var(--max-content);
+  margin-inline: auto;
+  padding: clamp(var(--xl), 6vw, var(--xxl)) clamp(var(--base), 5vw, var(--xl));
+  padding-bottom: calc(var(--dock-h) + var(--xxl));
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  align-content: center;
+  text-align: center;
+  gap: clamp(var(--lg), 4vw, var(--xl));
+  position: relative;
+  isolation: isolate;
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.96px;
+  color: var(--muted);
+}
+
+.theater__core {
+  display: grid;
+  gap: var(--xs);
+  justify-items: center;
+}
+
+.theater__caption {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.96px;
+  color: var(--muted);
+}
+
+.theater__stage {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(48px, 12vw, 144px);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--ink);
+  text-transform: lowercase;
+  text-wrap: balance;
+  background: linear-gradient(
+    180deg,
+    var(--ink) 0%,
+    var(--ink) 60%,
+    color-mix(in oklab, var(--ink) 80%, transparent) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  transition: text-shadow 400ms ease, transform 400ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body[data-pipeline="listening"] .theater__stage,
+body[data-pipeline="hearing"] .theater__stage {
+  text-shadow: 0 0 80px color-mix(in oklab, var(--gradient-sky) 60%, transparent);
+}
+
+body[data-pipeline="thinking"] .theater__stage {
+  text-shadow: 0 0 80px color-mix(in oklab, var(--gradient-lavender) 70%, transparent);
+}
+
+body[data-pipeline="speaking"] .theater__stage {
+  text-shadow: 0 0 80px color-mix(in oklab, var(--gradient-peach) 70%, transparent);
+}
+
+body[data-pipeline="error"] .theater__stage {
+  background: linear-gradient(180deg, var(--semantic-error) 0%, color-mix(in oklab, var(--semantic-error) 70%, transparent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ============================================================
+   Mic level meter
+============================================================ */
+
+.meter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  max-width: 560px;
+  height: clamp(72px, 14vw, 120px);
+  padding: 0 var(--xs);
+}
+
+.meter__bar {
+  --bar-h: 0.06;
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.meter__bar::before {
+  content: "";
+  width: clamp(3px, 0.6vw, 5px);
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: linear-gradient(
+    to top,
+    color-mix(in oklab, var(--orb-stop-2) 75%, transparent),
+    color-mix(in oklab, var(--orb-stop-1) 90%, transparent) 60%,
+    color-mix(in oklab, var(--orb-stop-3) 80%, transparent) 100%
+  );
+  transform: scaleY(var(--bar-h));
+  transform-origin: center;
+  transition: transform 100ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  box-shadow: 0 0 12px -2px color-mix(in oklab, var(--orb-stop-2) 40%, transparent);
+}
+
+/* ============================================================
+   Theater chip strip
+============================================================ */
+
+.theater__chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: var(--xs);
+  max-width: 800px;
+}
+
+/* ============================================================
+   Pipeline-state palettes (drives orb-stop variables)
+============================================================ */
+
+body[data-pipeline="idle"],
+body[data-pipeline="disconnected"] {
+  --orb-stop-1: var(--gradient-mint);
+  --orb-stop-2: var(--gradient-sky);
+  --orb-stop-3: var(--gradient-lavender);
+  --orb-stop-4: var(--gradient-mint);
+}
+
+body[data-pipeline="connecting"] {
+  --orb-stop-1: var(--gradient-sky);
+  --orb-stop-2: var(--gradient-mint);
+  --orb-stop-3: var(--gradient-lavender);
+  --orb-stop-4: var(--gradient-sky);
+}
+
+body[data-pipeline="ready"],
+body[data-pipeline="client_ready"],
+body[data-pipeline="connected"],
+body[data-pipeline="transcriber_connected"] {
+  --orb-stop-1: var(--gradient-mint);
+  --orb-stop-2: var(--gradient-sky);
+  --orb-stop-3: var(--gradient-lavender);
+  --orb-stop-4: var(--gradient-mint);
+}
+
+body[data-pipeline="listening"],
+body[data-pipeline="hearing"] {
+  --orb-stop-1: var(--gradient-sky);
+  --orb-stop-2: var(--gradient-mint);
+  --orb-stop-3: var(--gradient-lavender);
+  --orb-stop-4: var(--gradient-peach);
+}
+
+body[data-pipeline="thinking"] {
+  --orb-stop-1: var(--gradient-lavender);
+  --orb-stop-2: var(--gradient-sky);
+  --orb-stop-3: var(--gradient-rose);
+  --orb-stop-4: var(--gradient-lavender);
+}
+
+body[data-pipeline="speaking"] {
+  --orb-stop-1: var(--gradient-peach);
+  --orb-stop-2: var(--gradient-rose);
+  --orb-stop-3: var(--gradient-lavender);
+  --orb-stop-4: var(--gradient-peach);
+}
+
+body[data-pipeline="error"] {
+  --orb-stop-1: var(--gradient-rose);
+  --orb-stop-2: var(--gradient-peach);
+  --orb-stop-3: var(--gradient-rose);
+  --orb-stop-4: var(--gradient-rose);
+}
+
+/* ============================================================
+   Floating Action Bar — bottom-right particle-aura orb
+============================================================ */
+
+.dock {
+  position: fixed;
+  right: calc(var(--dock-pad) + env(safe-area-inset-right, 0));
+  bottom: calc(var(--dock-pad) + env(safe-area-inset-bottom, 0));
+  display: grid;
+  grid-template-columns: auto;
+  justify-items: end;
+  align-items: center;
+  gap: var(--xs);
+  z-index: 30;
+  pointer-events: none;
+}
+
+.dock > * { pointer-events: auto; }
+
+.fab {
+  position: relative;
+  width: var(--fab-size);
+  height: var(--fab-size);
+  border-radius: 50%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  isolation: isolate;
+  overflow: visible;
+  transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1.05);
+}
+
+.fab::before {
+  /* Subtle hairline ring — only visible on hover/focus to hint at click target */
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--ink) 14%, transparent);
+  opacity: 0;
+  transition: opacity 240ms ease, transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  pointer-events: none;
+}
+
+.fab:hover::before { opacity: 0.7; transform: scale(1.04); }
+.fab:focus-visible::before { opacity: 1; transform: scale(1.06); }
+.fab:focus-visible { outline: none; }
+
+.fab:hover { transform: scale(1.04); }
+.fab:active { transform: scale(0.96); }
+
+/* Particle aura — canvas extends well beyond the FAB so the cloud bleeds */
+.orb {
+  position: absolute;
+  inset: calc(var(--orb-canvas-bleed) * -1);
+  display: block;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.orb canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.dock__hint {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--surface-card) 70%, transparent);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid color-mix(in oklab, var(--hairline) 60%, transparent);
+  white-space: nowrap;
+  max-width: min(260px, 90vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 200ms ease, background 200ms ease;
+  user-select: none;
+}
+
+body[data-app-state="active"] .dock__hint {
+  color: var(--ink);
+}
+
+/* ============================================================
+   Chat overlay — glass tiles stacked above the FAB (bottom-right)
+============================================================ */
+
+.overlay {
+  position: fixed;
+  right: calc(var(--dock-pad) + env(safe-area-inset-right, 0));
+  bottom: calc(var(--dock-h) + var(--dock-pad) + var(--xs) + env(safe-area-inset-bottom, 0));
+  width: min(360px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--xs);
+  z-index: 25;
+  pointer-events: none;
+}
+
+.overlay > * { pointer-events: auto; }
+
+.overlay:not(:has(.turn:not([hidden]))) { display: none; }
+
+.turn {
+  border-radius: var(--r-xl);
+  padding: var(--sm) var(--base);
+  animation: turn-rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: opacity 200ms ease;
+}
+
+.turn[hidden] { display: none; }
+
+.turn--user.glass { background: color-mix(in oklab, var(--canvas-soft) 70%, transparent); }
+.turn--agent.glass { background: color-mix(in oklab, var(--surface-card) 72%, transparent); }
+
+@keyframes turn-rise {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.turn__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sm);
+  margin-bottom: 4px;
+}
+
+.turn__role {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.96px;
+  color: var(--muted);
+}
+
+.turn__hint {
+  font-size: 10px;
+  color: var(--muted-soft);
+  font-weight: 500;
+  letter-spacing: 0.16px;
+  text-transform: lowercase;
+}
+
+.turn__body {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--body-strong);
+  letter-spacing: 0.16px;
+  text-wrap: pretty;
+}
+
+.turn__body--display {
+  font-family: var(--font-display);
+  font-size: clamp(16px, 2vw, 19px);
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  color: var(--ink);
+}
+
+/* ============================================================
+   Buttons
+============================================================ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--xs);
+  padding: 12px 22px;
+  border-radius: var(--r-pill);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  min-height: 44px;
+  transition: background 200ms ease, color 200ms ease, transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+
+.btn--outline {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--hairline-strong);
+  padding: 9px 19px;
+}
+
+.btn--outline:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--canvas-soft);
+}
+
+.btn--ghost {
+  background: color-mix(in oklab, var(--surface-card) 50%, transparent);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  padding: 8px 14px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.btn--ghost:hover:not(:disabled) { background: var(--surface-strong); }
+
+.btn--sm {
+  padding: 8px 14px;
+  min-height: 36px;
+  font-size: 13px;
+  letter-spacing: 0.1px;
+}
+
+.btn--diag {
+  position: relative;
+  font-size: 12px;
+  letter-spacing: 0.96px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.btn__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--on-primary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+/* ============================================================
+   Diagnostics drawer
+============================================================ */
+
+.diagnostics {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 50;
+  background: var(--surface-card);
+  border-top: 1px solid var(--hairline);
+  border-radius: var(--r-xxl) var(--r-xxl) 0 0;
+  padding: var(--lg) clamp(var(--base), 4vw, var(--xl)) calc(var(--lg) + env(safe-area-inset-bottom, 0));
+  max-height: 78vh;
+  overflow-y: auto;
+  transform: translateY(calc(100% + 24px));
+  transition: transform 360ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 360ms ease;
+  box-shadow: 0 -1px 0 var(--hairline);
+  -webkit-overflow-scrolling: touch;
+}
+
+.diagnostics[data-open="true"] {
+  transform: translateY(0);
+  box-shadow: 0 -24px 64px -24px rgba(0, 0, 0, 0.18);
+}
+
+.diagnostics__scrim {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklab, #000 18%, transparent);
+  z-index: 45;
+  opacity: 0;
+  transition: opacity 280ms ease;
+  pointer-events: none;
+}
+
+.diagnostics__scrim[data-show="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.diagnostics__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--base);
+  margin-bottom: var(--lg);
+}
+
+.caption-uppercase {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.96px;
+  color: var(--ink);
+}
+
+.diagnostics__sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.diagnostics__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--xs);
+  padding-bottom: var(--lg);
+  margin-bottom: var(--lg);
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--xs);
+  margin-bottom: var(--lg);
+}
+
+.metric {
+  background: var(--canvas-soft);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 56px;
+}
+
+.metric__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.96px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.metric__value {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+  line-height: 1.3;
+}
+
+.metric--alert[data-error="true"] {
+  border-color: color-mix(in oklab, var(--semantic-error) 40%, var(--hairline));
+  background: color-mix(in oklab, var(--semantic-error) 4%, var(--canvas-soft));
+}
+
+.metric--alert[data-error="true"] .metric__value { color: var(--semantic-error); }
+
+.raw {
+  margin-top: var(--base);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-md);
+  background: var(--canvas-soft);
+  overflow: hidden;
+}
+
+.raw > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.96px;
+  color: var(--muted);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.raw > summary::-webkit-details-marker { display: none; }
+.raw > summary::after { content: "+"; font-size: 14px; color: var(--muted); }
+.raw[open] > summary::after { content: "−"; }
+
+.raw__pre,
+.raw__log {
+  margin: 0;
+  padding: var(--base);
+  background: var(--ink);
+  color: #e7e5e4;
+  font-family: ui-monospace, "JetBrains Mono", "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 240px;
+  overflow: auto;
+  border-top: 1px solid var(--hairline);
+}
+
+.raw__pre { white-space: pre-wrap; word-break: break-word; }
+.raw__log { list-style: none; }
+
+.raw__log li {
+  padding: 2px 0;
+  border-bottom: 1px solid color-mix(in oklab, #fff 8%, transparent);
+  color: var(--on-dark-soft);
+}
+
+.raw__log li:first-child { color: var(--on-dark); }
+
+/* ============================================================
+   Mobile
+============================================================ */
+
+@media (max-width: 720px) {
+  :root {
+    --fab-size: clamp(84px, 22vw, 104px);
+    --dock-h: calc(var(--fab-size) + 44px);
+    --dock-pad: var(--base);
+  }
+
+  .topbar {
+    padding: 0 var(--base);
+    gap: var(--xs);
+  }
+
+  .chip--state .chip__label { display: none; }
+  .chip--state { padding: 6px 8px; }
+
+  .theater {
+    padding-bottom: calc(var(--dock-h) + var(--xl));
+    gap: var(--base);
+  }
+
+  .theater__stage {
+    font-size: clamp(48px, 18vw, 96px);
+  }
+
+  .theater__chips { gap: 6px; }
+
+  .chip--ghost {
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+
+  .meter {
+    height: clamp(60px, 18vw, 88px);
+    gap: 3px;
+  }
+
+  .overlay {
+    width: min(320px, calc(100% - 24px));
+  }
+
+  .turn {
+    padding: var(--xs) var(--sm);
+  }
+
+  .diagnostics { max-height: 88vh; }
+
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* — Reduced motion — */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .meter__bar::before { transition: none !important; }
+}

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "algorithmic-art": {
+      "source": "C:\\tmp\\anthropics-skills\\skills\\algorithmic-art",
+      "sourceType": "local",
+      "computedHash": "987b24aa98171a0d3690420173b2cdb6eaafd57981ed716b5d50371affa82ea3"
+    }
+  }
+}

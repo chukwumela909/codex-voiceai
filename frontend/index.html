@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f5f5f5" />
+    <title>Codex — voice agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500&family=Inter:wght@400;500;600&display=swap"
+    />
+    <link rel="stylesheet" href="/static/styles.css?v=phase6.2" />
+  </head>
+  <body data-app-state="idle" data-pipeline="idle">
+    <header class="topbar">
+      <a class="wordmark" href="/" aria-label="Codex home">
+        <span class="wordmark__mark" aria-hidden="true"></span>
+        <span class="wordmark__text">Codex</span>
+      </a>
+      <div class="topbar__right">
+        <span class="chip chip--state" id="connectionChip" data-state="disconnected">
+          <span class="chip__dot" aria-hidden="true"></span>
+          <span class="chip__label" id="connectionState">disconnected</span>
+        </span>
+        <button
+          id="diagnosticsBtn"
+          class="btn btn--ghost btn--sm btn--diag"
+          type="button"
+          aria-controls="diagnostics"
+          aria-expanded="false"
+        >
+          <span class="btn__label">Advanced</span>
+          <span class="btn__badge" id="eventBadge" hidden>0</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="theater" aria-label="Live signal">
+      <p class="eyebrow">Live signal</p>
+
+      <div class="theater__core">
+        <p class="theater__caption">Pipeline</p>
+        <h1 class="theater__stage" id="pipelineStage">idle</h1>
+      </div>
+
+      <div class="meter" id="meter" aria-hidden="true"></div>
+
+      <div class="theater__chips" aria-label="Live metrics">
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Mode</span>
+          <span class="chip__value" id="mode">unknown</span>
+        </span>
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Latency</span>
+          <span class="chip__value" id="latencyValue">—</span>
+        </span>
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Provider</span>
+          <span class="chip__value" id="providerStage">none</span>
+        </span>
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Transcriber</span>
+          <span class="chip__value" id="transcriberState">idle</span>
+        </span>
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Mic level</span>
+          <span class="chip__value" id="micLevel">—</span>
+        </span>
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Mic frames</span>
+          <span class="chip__value" id="micFrames">0</span>
+        </span>
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Audio chunks</span>
+          <span class="chip__value" id="audioChunks">0</span>
+        </span>
+        <span class="chip chip--ghost">
+          <span class="chip__caption">Playback</span>
+          <span class="chip__value" id="playbackState">idle</span>
+        </span>
+      </div>
+    </main>
+
+    <!-- Chat tiles — stacked above the FAB at bottom-right -->
+    <section class="overlay" id="dialog" aria-live="polite" aria-label="Conversation">
+      <article class="turn turn--user glass" id="userTurn" hidden>
+        <header class="turn__head">
+          <span class="turn__role">You</span>
+          <span class="turn__hint">live</span>
+        </header>
+        <p class="turn__body" id="transcriptText">Listening…</p>
+      </article>
+      <article class="turn turn--agent glass" id="agentTurn" hidden>
+        <header class="turn__head">
+          <span class="turn__role">Agent</span>
+          <span class="turn__hint">streaming</span>
+        </header>
+        <p class="turn__body turn__body--display" id="agentText">No response yet.</p>
+      </article>
+    </section>
+
+    <!-- Floating action bar: orb at bottom-right -->
+    <div class="dock">
+      <button id="talkBtn" class="fab" type="button" aria-label="Start conversation">
+        <span class="orb" id="voiceOrb" aria-hidden="true"></span>
+      </button>
+      <span class="dock__hint" id="stageHint">Tap to begin</span>
+    </div>
+
+    <!-- Advanced diagnostics drawer -->
+    <aside id="diagnostics" class="diagnostics" data-open="false" aria-label="Advanced diagnostics">
+      <header class="diagnostics__head">
+        <div>
+          <p class="caption-uppercase">Advanced</p>
+          <p class="diagnostics__sub">Raw events, low-level telemetry, manual controls.</p>
+        </div>
+        <button id="diagnosticsCloseBtn" class="btn btn--ghost btn--sm" type="button" aria-label="Close advanced">
+          <span class="btn__label">Close</span>
+        </button>
+      </header>
+
+      <div class="diagnostics__controls">
+        <button id="connectBtn" class="btn btn--outline btn--sm" type="button">Connect</button>
+        <button id="disconnectBtn" class="btn btn--outline btn--sm" type="button" disabled>Disconnect</button>
+        <button id="micBtn" class="btn btn--outline btn--sm" type="button" disabled>Start mic</button>
+      </div>
+
+      <div class="metrics">
+        <div class="metric">
+          <span class="metric__label">Session</span>
+          <strong class="metric__value" id="sessionId">none</strong>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Mic state</span>
+          <strong class="metric__value" id="micState">off</strong>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Sample rate</span>
+          <strong class="metric__value" id="sampleRate">unknown</strong>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Frame bytes</span>
+          <strong class="metric__value" id="frameBytes">0</strong>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Mic bytes</span>
+          <strong class="metric__value" id="micBytes">0</strong>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Output level</span>
+          <strong class="metric__value" id="outputLevel">0</strong>
+        </div>
+        <div class="metric">
+          <span class="metric__label">Audio ctx</span>
+          <strong class="metric__value" id="audioContextState">unknown</strong>
+        </div>
+        <div class="metric metric--alert">
+          <span class="metric__label">Last error</span>
+          <strong class="metric__value" id="lastError">none</strong>
+        </div>
+      </div>
+
+      <details class="raw" open>
+        <summary>Latest event</summary>
+        <pre id="latestEvent" class="raw__pre">{}</pre>
+      </details>
+
+      <details class="raw">
+        <summary>Event log</summary>
+        <ol id="eventLog" class="raw__log"></ol>
+      </details>
+    </aside>
+
+    <div class="diagnostics__scrim" id="diagnosticsScrim" hidden></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.10.0/lib/p5.min.js"></script>
+    <script src="/static/app.js?v=phase6.2"></script>
+  </body>
+</html>

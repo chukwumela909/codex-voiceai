@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"^\\\\.\\\\.$\")",
+      "Bash(npx skills *)",
+      "Bash(SKILLS_CLONE_TIMEOUT_MS=600000 npx skills add https://github.com/anthropics/skills --skill algorithmic-art --yes)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(git --version)",
+      "Bash(git ls-remote *)",
+      "Bash(git clone *)"
+    ]
+  }
+}
