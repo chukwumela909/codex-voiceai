@@ -9,6 +9,7 @@ from uuid import uuid4
 from app.cartesia_tts import CartesiaStreamingTTS, generate_cartesia_context_id
 from app.deepgram import DeepgramStreamingTranscriber
 from app.events import event
+from app.exceptions import ClientConnectionClosed
 from app.groq_agent import GroqStreamingAgent, pop_speakable_chunks
 
 SendEvent = Callable[[dict], Awaitable[None]]
@@ -32,6 +33,9 @@ class MockConversationSession:
         self.live_transcript_sequence = 0
         self.active_response_id: str | None = None
         self.active_user_text: str | None = None
+        self.active_assistant_text = ""
+        self.final_transcript_buffer: list[str] = []
+        self.latest_partial_text: str | None = None
         self.interrupted_response_ids: set[str] = set()
         self.closed = False
 
@@ -107,6 +111,9 @@ class MockConversationSession:
         self.current_task = None
         self.active_response_id = None
         self.active_user_text = None
+        self.active_assistant_text = ""
+        self.final_transcript_buffer = []
+        self.latest_partial_text = None
 
     async def _start_live_transcriber(self) -> None:
         if self.transcriber:
@@ -132,6 +139,7 @@ class MockConversationSession:
             sample_rate=self.audio_config["sample_rate"],
             channels=self.audio_config["channels"],
             endpointing_ms=self.settings.deepgram_endpointing_ms,
+            utterance_end_ms=self.settings.deepgram_utterance_end_ms,
             on_transcript=self.handle_live_transcript,
             on_error=self.handle_live_error,
         )
@@ -149,6 +157,10 @@ class MockConversationSession:
         )
 
     async def handle_live_transcript(self, transcript: dict) -> None:
+        if transcript.get("type") == "utterance_end":
+            await self._handle_utterance_end(transcript)
+            return
+
         if self.turn_started_at is None:
             self.turn_started_at = time.perf_counter()
 
@@ -165,8 +177,17 @@ class MockConversationSession:
                 },
             )
         )
+        if transcript["is_final"]:
+            self._buffer_final_transcript(transcript["text"])
+        else:
+            self.latest_partial_text = transcript["text"]
+
         if self.current_task is not None:
-            if is_duplicate_active_turn(transcript["text"], self.active_user_text):
+            if not should_interrupt_active_response(
+                transcript,
+                active_user_text=self.active_user_text,
+                active_assistant_text=self.active_assistant_text,
+            ):
                 return
             await self._interrupt_active_response(transcript["text"])
 
@@ -174,8 +195,8 @@ class MockConversationSession:
             return
 
         self.live_transcript_sequence += 1
-        if transcript["speech_final"] or transcript["is_final"]:
-            await self._start_live_agent_response(transcript["text"], reason="provider_final")
+        if transcript["speech_final"]:
+            await self._start_buffered_agent_response(transcript["text"], reason="speech_final")
             return
 
         if self.pending_transcript_task and not self.pending_transcript_task.done():
@@ -187,8 +208,24 @@ class MockConversationSession:
     async def handle_live_error(self, message: str) -> None:
         await self.send_provider_error("deepgram", message)
 
+    async def _handle_utterance_end(self, transcript: dict) -> None:
+        if self.current_task is not None:
+            return
+        await self.send_event(
+            event(
+                "pipeline.stage",
+                self.session_id,
+                {
+                    "stage": "stt_utterance_end",
+                    "provider": "deepgram",
+                    "last_word_end": transcript.get("last_word_end"),
+                },
+            )
+        )
+        await self._start_buffered_agent_response(self.latest_partial_text, reason="utterance_end")
+
     async def _finalize_partial_transcript_after_idle(self, text: str, sequence: int) -> None:
-        idle_seconds = max(0.8, self.settings.deepgram_endpointing_ms / 1000 * 2)
+        idle_seconds = max(1.2, self.settings.deepgram_endpointing_ms / 1000 * 3)
         try:
             await asyncio.sleep(idle_seconds)
         except asyncio.CancelledError:
@@ -211,7 +248,13 @@ class MockConversationSession:
                 },
             )
         )
-        await self._start_live_agent_response(text, reason="partial_idle_timeout")
+        await self._start_buffered_agent_response(text, reason="partial_idle_timeout")
+
+    async def _start_buffered_agent_response(self, fallback_text: str | None, *, reason: str) -> None:
+        text = self._consume_buffered_transcript(fallback_text)
+        if not text:
+            return
+        await self._start_live_agent_response(text, reason=reason)
 
     async def _start_live_agent_response(self, text: str, *, reason: str) -> None:
         active_task = asyncio.current_task()
@@ -229,6 +272,25 @@ class MockConversationSession:
             )
         )
         self.current_task = asyncio.create_task(self._run_agent_response(text))
+
+    def _buffer_final_transcript(self, text: str) -> None:
+        normalized_text = normalize_turn_text(text)
+        if not normalized_text:
+            return
+        if any(normalize_turn_text(existing) == normalized_text for existing in self.final_transcript_buffer):
+            return
+        self.final_transcript_buffer.append(text)
+        self.latest_partial_text = text
+
+    def _consume_buffered_transcript(self, fallback_text: str | None) -> str:
+        if fallback_text:
+            self._buffer_final_transcript(fallback_text)
+        text = " ".join(part.strip() for part in self.final_transcript_buffer if part.strip()).strip()
+        if not text and fallback_text:
+            text = fallback_text.strip()
+        self.final_transcript_buffer = []
+        self.latest_partial_text = None
+        return text
 
     async def _interrupt_active_response(self, next_user_text: str) -> None:
         interrupted_response_id = self.active_response_id
@@ -301,6 +363,7 @@ class MockConversationSession:
         response_id = f"resp_{uuid4().hex}"
         self.active_response_id = response_id
         self.active_user_text = user_text
+        self.active_assistant_text = ""
         turn_started_at = self.turn_started_at or time.perf_counter()
         final_detected_at = time.perf_counter()
 
@@ -351,6 +414,7 @@ class MockConversationSession:
         self.current_task = None
         self.active_response_id = None
         self.active_user_text = None
+        self.active_assistant_text = ""
 
     async def _stream_speech(self, response_id: str, message: str, final_detected_at: float) -> None:
         await self.send_event(event("status.changed", self.session_id, {"state": "speaking"}))
@@ -449,7 +513,12 @@ class MockConversationSession:
                     "cartesia",
                     "Cartesia completed without sending audio chunks. Check CARTESIA_API_KEY, CARTESIA_VOICE_ID, model access, and account permissions.",
                 )
+        except ClientConnectionClosed:
+            self.closed = True
+            raise
         except Exception as exc:
+            if self.closed:
+                return
             await self.send_provider_error("cartesia", str(exc))
 
     async def _stream_mock_speech(self, response_id: str, final_detected_at: float) -> None:
@@ -509,7 +578,12 @@ class MockConversationSession:
             chunks, pending = pop_speakable_chunks(pending, force=True)
             await self._emit_agent_text_chunks(response_id, chunks, text_so_far=emitted_text)
             return full_response.strip()
+        except ClientConnectionClosed:
+            self.closed = True
+            raise
         except Exception as exc:
+            if self.closed:
+                raise
             await self.send_provider_error("groq", str(exc))
             message = "I heard you, but Groq did not return a response. Check the server logs and API key."
             await self._emit_agent_text_chunks(response_id, split_mock_response(message))
@@ -535,6 +609,7 @@ class MockConversationSession:
             if delay_seconds:
                 await asyncio.sleep(delay_seconds)
             text_so_far += chunk
+            self.active_assistant_text = text_so_far
             await self.send_event(
                 event(
                     "agent.text.delta",
@@ -545,6 +620,8 @@ class MockConversationSession:
         return text_so_far
 
     async def send_provider_error(self, provider: str, message: str) -> None:
+        if self.closed:
+            return
         await self.send_event(
             event(
                 "pipeline.stage",
@@ -598,6 +675,44 @@ def is_duplicate_active_turn(incoming_text: str, active_user_text: str | None) -
         return False
 
     return normalized_incoming == normalized_active
+
+
+def should_interrupt_active_response(
+    transcript: dict,
+    *,
+    active_user_text: str | None,
+    active_assistant_text: str,
+) -> bool:
+    text = transcript.get("text", "")
+    if not text or not is_meaningful_user_speech(text):
+        return False
+    if is_duplicate_active_turn(text, active_user_text):
+        return False
+    if is_likely_assistant_echo(text, active_assistant_text):
+        return False
+    if not (transcript.get("is_final") or transcript.get("speech_final")):
+        return False
+    confidence = transcript.get("confidence")
+    if confidence is not None and confidence < 0.75 and not transcript.get("speech_final"):
+        return False
+    return True
+
+
+def is_meaningful_user_speech(text: str) -> bool:
+    normalized = normalize_turn_text(text)
+    if not normalized:
+        return False
+    words = normalized.split()
+    return len(words) >= 2 or len(normalized) >= 12
+
+
+def is_likely_assistant_echo(incoming_text: str, active_assistant_text: str) -> bool:
+    incoming_tokens = set(normalize_turn_text(incoming_text).split())
+    assistant_tokens = set(normalize_turn_text(active_assistant_text).split())
+    if not incoming_tokens or not assistant_tokens:
+        return False
+    overlap = len(incoming_tokens & assistant_tokens) / len(incoming_tokens)
+    return overlap >= 0.6
 
 
 def normalize_turn_text(text: str) -> str:

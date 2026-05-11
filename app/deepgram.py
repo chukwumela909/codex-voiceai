@@ -5,6 +5,8 @@ from urllib.parse import urlencode
 
 import websockets
 
+from app.exceptions import ClientConnectionClosed
+
 
 DeepgramTranscriptHandler = Callable[[dict], Awaitable[None]]
 DeepgramErrorHandler = Callable[[str], Awaitable[None]]
@@ -20,6 +22,7 @@ class DeepgramStreamingTranscriber:
         sample_rate: int,
         channels: int,
         endpointing_ms: int,
+        utterance_end_ms: int,
         on_transcript: DeepgramTranscriptHandler,
         on_error: DeepgramErrorHandler,
     ) -> None:
@@ -29,6 +32,7 @@ class DeepgramStreamingTranscriber:
         self.sample_rate = sample_rate
         self.channels = channels
         self.endpointing_ms = endpointing_ms
+        self.utterance_end_ms = utterance_end_ms
         self.on_transcript = on_transcript
         self.on_error = on_error
         self.websocket = None
@@ -44,6 +48,8 @@ class DeepgramStreamingTranscriber:
                 "channels": self.channels,
                 "interim_results": "true",
                 "endpointing": self.endpointing_ms,
+                "utterance_end_ms": self.utterance_end_ms,
+                "vad_events": "true",
                 "smart_format": "true",
                 "punctuate": "true",
             }
@@ -78,6 +84,8 @@ class DeepgramStreamingTranscriber:
                     await self.on_transcript(parsed)
         except asyncio.CancelledError:
             raise
+        except ClientConnectionClosed:
+            self.closed = True
         except Exception as exc:
             if not self.closed:
                 await self.on_error(str(exc))
@@ -88,6 +96,13 @@ def parse_deepgram_message(raw_message: str | bytes) -> dict | None:
         raw_message = raw_message.decode("utf-8")
 
     data = json.loads(raw_message)
+    if data.get("type") == "UtteranceEnd":
+        return {
+            "type": "utterance_end",
+            "last_word_end": data.get("last_word_end"),
+            "provider": "deepgram",
+        }
+
     alternative = data.get("channel", {}).get("alternatives", [{}])[0]
     transcript = alternative.get("transcript", "").strip()
     if not transcript:

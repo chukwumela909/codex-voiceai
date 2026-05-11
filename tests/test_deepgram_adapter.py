@@ -65,3 +65,21 @@ def test_parse_deepgram_empty_transcript_is_ignored():
     )
 
     assert parsed is None
+
+
+def test_parse_deepgram_utterance_end():
+    parsed = parse_deepgram_message(
+        json.dumps(
+            {
+                "type": "UtteranceEnd",
+                "channel": [0, 1],
+                "last_word_end": 2.395,
+            }
+        )
+    )
+
+    assert parsed == {
+        "type": "utterance_end",
+        "last_word_end": 2.395,
+        "provider": "deepgram",
+    }

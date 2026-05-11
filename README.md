@@ -47,12 +47,15 @@ Server:
 - `VOICE_AGENT_HOST`: bind host, default `0.0.0.0`
 - `VOICE_AGENT_PORT`: bind port, default `8000`
 - `PORT`: deployment-platform fallback if `VOICE_AGENT_PORT` is unset
+- `VOICE_AGENT_WS_PING_INTERVAL`: browser WebSocket ping interval, default `30`
+- `VOICE_AGENT_WS_PING_TIMEOUT`: browser WebSocket ping timeout, default `120`
 - `VOICE_AGENT_CORS_ORIGINS`: comma-separated allowed origins, or `*`
 
 Provider tuning:
 
 - `DEEPGRAM_MODEL`, default `nova-3`
 - `DEEPGRAM_ENDPOINTING_MS`, default `300`
+- `DEEPGRAM_UTTERANCE_END_MS`, default `1000`
 - `GROQ_MODEL`, default `llama-3.1-8b-instant`
 - `GROQ_TEMPERATURE`, default `0.7`
 - `CARTESIA_MODEL`, default `sonic-3`

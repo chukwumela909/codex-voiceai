@@ -51,3 +51,15 @@ def test_public_config_status_never_exposes_secret_values(monkeypatch):
     assert "groq-secret" not in rendered
     assert "cartesia-secret" not in rendered
     assert "voice-secret" not in rendered
+
+
+def test_websocket_keepalive_defaults_and_overrides(monkeypatch):
+    monkeypatch.setenv("VOICE_AGENT_WS_PING_INTERVAL", "45")
+    monkeypatch.setenv("VOICE_AGENT_WS_PING_TIMEOUT", "180")
+    monkeypatch.setenv("DEEPGRAM_UTTERANCE_END_MS", "1200")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ws_ping_interval == 45
+    assert settings.ws_ping_timeout == 180
+    assert settings.deepgram_utterance_end_ms == 1200

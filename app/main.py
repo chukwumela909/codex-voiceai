@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -8,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.events import CLIENT_EVENT_TYPES, PLANNED_EVENT_TYPES, SERVER_EVENT_TYPES, event, new_session_id
+from app.exceptions import ClientConnectionClosed
 from app.mock_conversation import MockConversationSession
 
 
@@ -75,7 +77,12 @@ def log_server_event(payload: dict) -> None:
 
 async def send_server_event(websocket: WebSocket, payload: dict) -> None:
     log_server_event(payload)
-    await websocket.send_json(payload)
+    try:
+        await websocket.send_json(payload)
+    except WebSocketDisconnect as exc:
+        raise ClientConnectionClosed from exc
+    except RuntimeError as exc:
+        raise ClientConnectionClosed from exc
 
 
 @app.get("/")
@@ -105,8 +112,15 @@ async def events_contract() -> dict:
 async def browser_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = new_session_id()
+    conversation: MockConversationSession | None = None
+
     async def send_event_to_client(payload: dict) -> None:
-        await send_server_event(websocket, payload)
+        try:
+            await send_server_event(websocket, payload)
+        except ClientConnectionClosed:
+            if conversation and not conversation.closed:
+                asyncio.create_task(conversation.close())
+            raise
 
     conversation = MockConversationSession(session_id, send_event_to_client, settings)
     log_info("browser websocket accepted", session_id=session_id)
@@ -154,10 +168,11 @@ async def browser_ws(websocket: WebSocket) -> None:
                     break
             elif "bytes" in message and message["bytes"] is not None:
                 await conversation.receive_audio(message["bytes"])
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, ClientConnectionClosed):
         log_info("browser websocket disconnected", session_id=session_id)
     finally:
-        await conversation.close()
+        if conversation:
+            await conversation.close()
         log_info("browser websocket session ended", session_id=session_id)
 
 

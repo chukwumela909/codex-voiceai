@@ -11,6 +11,8 @@ def main() -> None:
         port=settings.port,
         proxy_headers=True,
         forwarded_allow_ips="*",
+        ws_ping_interval=settings.ws_ping_interval,
+        ws_ping_timeout=settings.ws_ping_timeout,
     )
 
 

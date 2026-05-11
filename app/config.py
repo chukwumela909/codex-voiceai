@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     mode: str = Field(default="mock", alias="VOICE_AGENT_MODE")
     host: str = Field(default="0.0.0.0", alias="VOICE_AGENT_HOST")
     port: int = Field(default=8000, validation_alias=AliasChoices("VOICE_AGENT_PORT", "PORT"))
+    ws_ping_interval: float = Field(default=30.0, alias="VOICE_AGENT_WS_PING_INTERVAL")
+    ws_ping_timeout: float = Field(default=120.0, alias="VOICE_AGENT_WS_PING_TIMEOUT")
     cors_origins: str = Field(
         default="http://localhost:8000,http://127.0.0.1:8000",
         alias="VOICE_AGENT_CORS_ORIGINS",
@@ -21,6 +23,7 @@ class Settings(BaseSettings):
 
     deepgram_model: str = Field(default="nova-3", alias="DEEPGRAM_MODEL")
     deepgram_endpointing_ms: int = Field(default=300, alias="DEEPGRAM_ENDPOINTING_MS")
+    deepgram_utterance_end_ms: int = Field(default=1000, alias="DEEPGRAM_UTTERANCE_END_MS")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.7, alias="GROQ_TEMPERATURE")
     cartesia_model: str = Field(default="sonic-3", alias="CARTESIA_MODEL")

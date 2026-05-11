@@ -330,17 +330,42 @@ function connect() {
     }
   });
 
-  socket.addEventListener("close", () => {
+  socket.addEventListener("close", (event) => {
+    const wasExpected = appState === "ending" || event.code === 1000;
+    const closeMessage = event.reason || "No close reason provided.";
+
+    recordEvent({
+      type: "socket.closed",
+      payload: {
+        code: event.code,
+        reason: closeMessage,
+        wasClean: event.wasClean,
+        expected: wasExpected
+      }
+    });
+
     setConnectionState("disconnected");
-    setPipelineState("idle");
     stopMic();
+    clearPlaybackQueue();
     socket = null;
     pendingMicAfterConnect = false;
+
+    if (wasExpected) {
+      setPipelineState("idle");
+      setAppState("idle");
+      return;
+    }
+
+    const message = `Connection dropped (${event.code || "unknown"}): ${closeMessage}`;
+    lastError.textContent = message;
+    if (lastErrorMetric) lastErrorMetric.dataset.error = "true";
+    setPipelineState("error");
     setAppState("idle");
+    if (stageHint) stageHint.textContent = "Connection dropped";
   });
 
   socket.addEventListener("error", () => {
-    recordEvent({ type: "error", payload: { message: "WebSocket error. Check backend logs." } });
+    recordEvent({ type: "error", payload: { message: "WebSocket error. Waiting for close details." } });
   });
 }
 
