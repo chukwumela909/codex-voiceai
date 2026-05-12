@@ -103,7 +103,11 @@ def parse_deepgram_message(raw_message: str | bytes) -> dict | None:
             "provider": "deepgram",
         }
 
-    alternative = data.get("channel", {}).get("alternatives", [{}])[0]
+    channel = data.get("channel", {})
+    if not isinstance(channel, dict):
+        return None
+
+    alternative = channel.get("alternatives", [{}])[0]
     transcript = alternative.get("transcript", "").strip()
     if not transcript:
         return None

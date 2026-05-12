@@ -83,3 +83,17 @@ def test_parse_deepgram_utterance_end():
         "last_word_end": 2.395,
         "provider": "deepgram",
     }
+
+
+def test_parse_deepgram_non_transcript_control_event_is_ignored():
+    parsed = parse_deepgram_message(
+        json.dumps(
+            {
+                "type": "SpeechStarted",
+                "channel": [0, 1],
+                "timestamp": 0.64,
+            }
+        )
+    )
+
+    assert parsed is None
