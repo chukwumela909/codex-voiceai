@@ -83,7 +83,7 @@ Live mode preserves raw Deepgram transcripts in `transcript.partial`, `transcrip
 
 `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS` controls the app fallback used when Deepgram has not emitted `speech_final`. The default is `1000ms` to leave more room for natural thinking pauses. Lower it for snappier demos; raise it when the assistant interrupts too early.
 
-When Cartesia is configured, `VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED=true` applies conservative SSML-style speech direction to TTS input only. Frontend assistant text stays plain. The first version adds short context-relevant pauses after discourse markers, pauses before inferred clarifications, and spells code-like tokens such as API names or numeric IDs. Emotion tags are disabled by default with `VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED=false`.
+When Cartesia is configured, `VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED=true` applies conservative SSML-style speech direction to TTS input only. Frontend assistant text stays plain. The director adds short context-relevant pauses after discourse markers, pauses before inferred clarifications, and spells code-like tokens such as API names or numeric IDs. Emotion tags are disabled by default with `VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED=false`.
 
 Proactive conversation tuning:
 
@@ -139,6 +139,7 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
     "mode": "live",
     "live_ready": true,
     "missing_live_keys": [],
+    "invalid_live_keys": [],
     "server": { "host": "0.0.0.0", "port": 8000 },
     "cors": {
       "allow_all_origins": false,
@@ -174,9 +175,9 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
       "configured": "auto",
       "enabled": false,
       "startup_greeting_delay_ms": 500,
-      "silence_timeout_ms": 5000,
-      "repeat_cooldown_ms": 8000,
-      "max_consecutive_prompts": 3,
+      "silence_timeout_ms": 30000,
+      "repeat_cooldown_ms": 60000,
+      "max_consecutive_prompts": 1,
       "failure_backoff_threshold": 2,
       "failure_backoff_ms": 30000,
       "contextual_followups_enabled": true
