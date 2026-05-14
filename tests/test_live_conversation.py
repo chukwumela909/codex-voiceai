@@ -1126,6 +1126,66 @@ def test_live_cartesia_audio_can_start_before_llm_final_text_event():
     assert spoken_chunks == ["This first sentence can speak now. ", "Second sentence arrives later. "]
 
 
+def test_cartesia_streaming_failure_does_not_truncate_final_agent_text():
+    events = []
+    spoken_chunks = []
+
+    class TwoChunkAgent:
+        async def stream_response(self, transcript):
+            yield "This first sentence can speak now. "
+            await asyncio.sleep(0)
+            yield "Second sentence should still reach the final text."
+
+    class FailingStreamingSynthesizer:
+        async def stream_speech_chunks(self, chunks, *, context_id):
+            async for chunk in chunks:
+                spoken_chunks.append(chunk)
+                yield {"type": "error", "message": "bad ssml", "context_id": context_id, "done": True}
+                return
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession(
+            "sess_test",
+            send_event,
+            proactive_settings(
+                normalized_mode="live",
+                groq_api_key="groq-key",
+                cartesia_api_key="cartesia-key",
+                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
+                cartesia_model="sonic-3",
+                cartesia_sample_rate=16000,
+                cartesia_version="2026-03-01",
+                cartesia_speed=1.2,
+                cartesia_speech_director_enabled=True,
+                cartesia_ssml_enabled=True,
+                cartesia_emotion_tags_enabled=False,
+            ),
+        )
+        session.agent = TwoChunkAgent()
+        session.synthesizer = FailingStreamingSynthesizer()
+        await session._run_agent_response("Hello?")
+
+    asyncio.run(run_session())
+
+    final = next(event for event in events if event["type"] == "agent.text.final")
+    assert final["payload"]["text"] == (
+        "This first sentence can speak now. "
+        "Second sentence should still reach the final text."
+    )
+    assert "<break" not in final["payload"]["text"]
+    assert spoken_chunks == ["This first sentence can speak now. "]
+    assert any(event["type"] == "error" and event["payload"].get("provider") == "cartesia" for event in events)
+    assert any(
+        event["type"] == "pipeline.stage"
+        and event["payload"].get("stage") == "tts_fallback"
+        and event["payload"].get("fallback_from") == "cartesia"
+        for event in events
+    )
+
+
 def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_plain():
     events = []
     audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")

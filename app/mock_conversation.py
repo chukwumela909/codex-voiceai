@@ -1305,9 +1305,12 @@ class MockConversationSession:
         full_response = ""
         pending = ""
         emitted_text = ""
+        stream_complete = False
+        sentinel = object()
+        chunk_queue: asyncio.Queue[str | object] = asyncio.Queue()
 
-        async def speakable_chunks() -> AsyncIterator[str]:
-            nonlocal emitted_text, full_response, pending
+        async def drain_agent_response() -> None:
+            nonlocal emitted_text, full_response, pending, stream_complete
             try:
                 async for delta in self.agent.stream_response(agent_transcript):
                     full_response += delta
@@ -1320,7 +1323,7 @@ class MockConversationSession:
                         metadata=metadata,
                     )
                     for chunk in chunks:
-                        yield chunk
+                        await chunk_queue.put(chunk)
 
                 chunks, pending = pop_speakable_chunks(pending, force=True)
                 emitted_text = await self._emit_agent_text_chunks(
@@ -1330,7 +1333,7 @@ class MockConversationSession:
                     metadata=metadata,
                 )
                 for chunk in chunks:
-                    yield chunk
+                    await chunk_queue.put(chunk)
             except ClientConnectionClosed:
                 self.closed = True
                 raise
@@ -1348,18 +1351,45 @@ class MockConversationSession:
                     metadata=metadata,
                 )
                 for chunk in chunks:
-                    yield chunk
+                    await chunk_queue.put(chunk)
+            finally:
+                stream_complete = True
+                await chunk_queue.put(sentinel)
 
-        cartesia_succeeded = await self._stream_cartesia_speech_chunks(
-            response_id,
-            speakable_chunks(),
-            final_detected_at,
-            metadata=metadata,
-        )
-        if not cartesia_succeeded:
-            if not full_response.strip():
-                full_response = await self._stream_live_agent_response(response_id)
-            await self._stream_tts_fallback(response_id, final_detected_at, fallback_from="cartesia", metadata=metadata)
+        async def speakable_chunks() -> AsyncIterator[str]:
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is sentinel:
+                    return
+                yield str(chunk)
+
+        drain_task = asyncio.create_task(drain_agent_response())
+        try:
+            cartesia_succeeded = await self._stream_cartesia_speech_chunks(
+                response_id,
+                speakable_chunks(),
+                final_detected_at,
+                metadata=metadata,
+            )
+            if not cartesia_succeeded:
+                if not stream_complete:
+                    await drain_task
+                if not full_response.strip():
+                    full_response = await self._stream_live_agent_response(response_id)
+                await self._stream_tts_fallback(
+                    response_id,
+                    final_detected_at,
+                    fallback_from="cartesia",
+                    metadata=metadata,
+                )
+            await drain_task
+        finally:
+            if not drain_task.done():
+                drain_task.cancel()
+                try:
+                    await drain_task
+                except asyncio.CancelledError:
+                    pass
 
         return full_response.strip()
 

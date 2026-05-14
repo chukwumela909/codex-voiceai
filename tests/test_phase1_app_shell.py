@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 os.environ["VOICE_AGENT_MODE"] = "mock"
+os.environ["VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS"] = "1000"
 
 from app.main import app, log_server_event
 
@@ -32,7 +33,7 @@ def test_health_reports_service_and_config_status():
         "scene": "room_line",
         "volume": 0.035,
     }
-    assert body["config"]["turn_timing"]["partial_idle_finalize_ms"] == 650
+    assert body["config"]["turn_timing"]["partial_idle_finalize_ms"] == 1000
 
 
 def test_events_contract_documents_initial_and_planned_events():
@@ -145,7 +146,7 @@ def test_browser_websocket_starts_session_and_accepts_hello():
             "scene": "room_line",
             "volume": 0.035,
         }
-        assert started["payload"]["turn_timing"]["partial_idle_finalize_ms"] == 650
+        assert started["payload"]["turn_timing"]["partial_idle_finalize_ms"] == 1000
         assert connected["type"] == "status.changed"
         assert connected["payload"]["state"] == "connected"
 
