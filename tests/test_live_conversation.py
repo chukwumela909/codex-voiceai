@@ -1172,7 +1172,7 @@ def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_p
     final = next(event for event in events if event["type"] == "agent.text.final")
     assert final["payload"]["text"] == "Well, I think you meant the Deepgram model is missing words."
     assert spoken_chunks == [
-        'Well,<break time="180ms"/> I think you meant the Deepgram model is missing words. '
+        'Well,<break time="180ms"/> I think you meant<break time="250ms"/> the Deepgram model is missing words. '
     ]
     assert any(
         event["type"] == "pipeline.stage"

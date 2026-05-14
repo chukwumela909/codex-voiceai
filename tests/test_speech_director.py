@@ -23,6 +23,14 @@ def test_director_adds_clarification_pause_when_inferring_intent():
     assert directed == 'I think you meant<break time="250ms"/> the Deepgram model is missing words.'
 
 
+def test_director_preserves_existing_ssml_tags():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = 'Well,<break time="120ms"/> keep this as authored.'
+
+    assert direct_speech_for_cartesia(text, config) == text
+
+
 def test_director_spells_code_like_tokens():
     config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
 

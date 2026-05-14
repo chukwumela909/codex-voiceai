@@ -38,8 +38,8 @@ def _add_discourse_pause(text: str) -> str:
 
 def _add_clarification_pause(text: str) -> str:
     phrase = "I think you meant "
-    if text.startswith(phrase):
-        return 'I think you meant<break time="250ms"/> ' + text[len(phrase):]
+    if phrase in text:
+        return text.replace(phrase, 'I think you meant<break time="250ms"/> ', 1)
     return text
 
 
