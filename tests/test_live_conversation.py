@@ -1533,6 +1533,71 @@ def test_deepgram_start_failure_falls_back_to_mock_turn_detection(monkeypatch):
     )
 
 
+def test_deepgram_send_failure_falls_back_without_closing_session(monkeypatch):
+    events = []
+
+    class SendFailingTranscriber:
+        def __init__(self, **kwargs):
+            self.closed = False
+
+        async def start(self):
+            pass
+
+        async def send_audio(self, frame):
+            raise RuntimeError("deepgram send closed")
+
+        async def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(mock_conversation, "DeepgramStreamingTranscriber", SendFailingTranscriber)
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession(
+            "sess_test",
+            send_event,
+            proactive_settings(
+                normalized_mode="live",
+                proactive_effective_enabled=False,
+                deepgram_api_key="deepgram-key",
+                deepgram_model="nova-3",
+                deepgram_endpointing_ms=300,
+                deepgram_utterance_end_ms=1000,
+                cartesia_api_key=None,
+                cartesia_voice_id=None,
+            ),
+        )
+        await session.configure_audio(
+            {
+                "encoding": "pcm_s16le",
+                "sample_rate": 16000,
+                "channels": 1,
+                "frame_duration_ms": 20,
+            }
+        )
+        await session.receive_audio(mock_speech_frame())
+        assert session.closed is False
+        assert session.transcriber is None
+        assert session.current_task is not None
+        await session.current_task
+
+    asyncio.run(run_session())
+
+    assert any(event["type"] == "error" and event["payload"].get("provider") == "deepgram" for event in events)
+    assert any(
+        event["type"] == "pipeline.stage"
+        and event["payload"].get("stage") == "stt_fallback"
+        and event["payload"].get("fallback_from") == "deepgram"
+        for event in events
+    )
+    assert any(
+        event["type"] == "transcript.final" and event["payload"].get("provider") == "mock"
+        for event in events
+    )
+
+
 def test_close_cancels_pending_proactive_timer_without_triggering_turn():
     events = []
 

@@ -145,8 +145,12 @@ class MockConversationSession:
             await self._maybe_schedule_startup_greeting()
 
         if self.transcriber:
-            await self.transcriber.send_audio(processed_frame)
-            return
+            try:
+                await self.transcriber.send_audio(processed_frame)
+                return
+            except Exception as exc:
+                await self.handle_live_error(f"Deepgram audio send failed: {exc}")
+                mock_speech_detected = is_mock_speech_frame(level)
 
         if not mock_speech_detected:
             return
