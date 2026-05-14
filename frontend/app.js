@@ -59,7 +59,10 @@ let pendingMicBytes = 0;
 let targetMicFrameBytes = 640;
 let playbackTime = 0;
 let activeSources = [];
-let activeResponseId = null;
+let activeTextResponseId = null;
+let activeAudioResponseId = null;
+let localBargeInState = { consecutiveSpeechFrames: 0, cooldownUntilMs: 0, playbackActive: false };
+const locallyInterruptedAudioResponseIds = new Set();
 let ambienceConfig = { enabled: true, scene: "room_line", volume: 0.035 };
 let ambienceNodes = null;
 
@@ -251,6 +254,7 @@ function recordEvent(event) {
   }
 
   if (event.type === "interruption.started") {
+    rememberLocalAudioInterruption(event.payload?.interrupted_response_id || activeAudioResponseId);
     clearPlaybackQueue();
     playbackState.textContent = "interrupted";
     setPipelineState("listening");
@@ -267,14 +271,14 @@ function recordEvent(event) {
   }
 
   if (event.type === "agent.text.delta") {
-    activeResponseId = event.payload.response_id;
+    activeTextResponseId = event.payload.response_id;
     const text = event.payload.text_so_far || event.payload.text || "";
     agentText.textContent = text;
     if (agentTurn && text) agentTurn.hidden = false;
   }
 
   if (event.type === "agent.text.final") {
-    activeResponseId = event.payload.response_id;
+    activeTextResponseId = event.payload.response_id;
     const text = event.payload.text || "";
     agentText.textContent = text;
     if (agentTurn && text) agentTurn.hidden = false;
@@ -353,6 +357,10 @@ function connect() {
     stopMic();
     clearPlaybackQueue();
     socket = null;
+    activeTextResponseId = null;
+    activeAudioResponseId = null;
+    locallyInterruptedAudioResponseIds.clear();
+    resetLocalBargeInCounter();
     pendingMicAfterConnect = false;
 
     if (wasExpected) {
@@ -587,7 +595,63 @@ function stopMic() {
   setMicState("off");
 }
 
+function hasPlaybackActivity() {
+  const queuedAheadSeconds = Math.max(0, playbackTime - (audioContext?.currentTime || 0));
+  return activeSources.length > 0 || queuedAheadSeconds > 0.03;
+}
+
+function rememberLocalAudioInterruption(responseId) {
+  if (!responseId) return;
+  locallyInterruptedAudioResponseIds.add(responseId);
+  while (locallyInterruptedAudioResponseIds.size > 20) {
+    const oldest = locallyInterruptedAudioResponseIds.values().next().value;
+    locallyInterruptedAudioResponseIds.delete(oldest);
+  }
+}
+
+function resetLocalBargeInCounter() {
+  localBargeInState = {
+    consecutiveSpeechFrames: 0,
+    cooldownUntilMs: localBargeInState.cooldownUntilMs || 0,
+    playbackActive: false,
+  };
+}
+
+function triggerLocalBargeIn() {
+  rememberLocalAudioInterruption(activeAudioResponseId);
+  clearPlaybackQueue();
+  playbackState.textContent = "interrupted";
+}
+
+function evaluateLocalBargeIn(buffer) {
+  if (!window.VoiceAudioBehavior) return;
+  const playbackActive = hasPlaybackActivity();
+
+  if (!playbackActive) {
+    resetLocalBargeInCounter();
+    return;
+  }
+
+  if (activeAudioResponseId && locallyInterruptedAudioResponseIds.has(activeAudioResponseId)) {
+    return;
+  }
+
+  const level = window.VoiceAudioBehavior.pcmLevelFromArrayBuffer(buffer);
+  const result = window.VoiceAudioBehavior.shouldTriggerLocalBargeIn(
+    level,
+    { ...localBargeInState, playbackActive },
+    window.VoiceAudioBehavior.DEFAULT_BARGE_IN_CONFIG,
+    performance.now(),
+  );
+  localBargeInState = result.state;
+
+  if (result.triggered) {
+    triggerLocalBargeIn();
+  }
+}
+
 function queueMicFrame(buffer) {
+  evaluateLocalBargeIn(buffer);
   pendingMicBuffers.push(buffer);
   pendingMicBytes += buffer.byteLength;
   if (pendingMicBytes < targetMicFrameBytes) return;
@@ -611,9 +675,13 @@ function queueMicFrame(buffer) {
 function playPcmChunk(payload) {
   if (!payload.audio || payload.encoding !== "pcm_s16le") return;
 
-  if (payload.response_id && payload.response_id !== activeResponseId) {
+  const responseId = payload.response_id || null;
+  if (responseId && locallyInterruptedAudioResponseIds.has(responseId)) return;
+
+  if (responseId && responseId !== activeAudioResponseId) {
     clearPlaybackQueue();
-    activeResponseId = payload.response_id;
+    activeAudioResponseId = responseId;
+    resetLocalBargeInCounter();
   }
 
   const context = audioContext || new AudioContext({ sampleRate: payload.sample_rate || 16000 });

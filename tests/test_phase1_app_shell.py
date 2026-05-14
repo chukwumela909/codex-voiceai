@@ -229,3 +229,16 @@ def test_browser_websocket_mock_audio_loop_emits_transcript_agent_audio_and_late
         assert "latency.metric" in seen_types
         assert "pipeline.stage" in seen_types
         assert "audio.chunk" in seen_types
+
+
+def test_frontend_wires_local_barge_in_audio_behavior():
+    index = Path("frontend/index.html").read_text(encoding="utf-8")
+    app_js = Path("frontend/app.js").read_text(encoding="utf-8")
+
+    assert "/static/audio-behavior.js" in index
+    assert "activeTextResponseId" in app_js
+    assert "activeAudioResponseId" in app_js
+    assert "locallyInterruptedAudioResponseIds" in app_js
+    assert "evaluateLocalBargeIn" in app_js
+    assert "VoiceAudioBehavior.pcmLevelFromArrayBuffer" in app_js
+    assert "VoiceAudioBehavior.shouldTriggerLocalBargeIn" in app_js
