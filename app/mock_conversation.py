@@ -21,6 +21,7 @@ from app.proactive import (
     ProactivePolicy,
     ProactivePolicyConfig,
 )
+from app.speech_director import SpeechDirectionConfig, direct_speech_for_cartesia
 
 SendEvent = Callable[[dict], Awaitable[None]]
 RECENT_CONTEXT_TURN_LIMIT = 8
@@ -958,6 +959,34 @@ class MockConversationSession:
             speed=getattr(self.settings, "cartesia_speed", None),
         )
 
+    async def _direct_cartesia_text(self, text: str, *, metadata: dict | None = None) -> str:
+        metadata = metadata or {}
+        config = SpeechDirectionConfig(
+            enabled=bool(getattr(self.settings, "cartesia_speech_director_enabled", True)),
+            ssml_enabled=bool(getattr(self.settings, "cartesia_ssml_enabled", True)),
+            emotion_tags_enabled=bool(getattr(self.settings, "cartesia_emotion_tags_enabled", False)),
+        )
+        try:
+            directed = direct_speech_for_cartesia(text, config)
+        except Exception as exc:
+            await self.send_provider_error("cartesia", f"Speech direction failed: {exc}", metadata=metadata)
+            return text
+
+        if directed != text:
+            await self.send_event(
+                event(
+                    "pipeline.stage",
+                    self.session_id,
+                    {
+                        "stage": "tts_speech_direction",
+                        "provider": "cartesia",
+                        "directed": True,
+                        **metadata,
+                    },
+                )
+            )
+        return directed
+
     async def _stream_tts_fallback(
         self,
         response_id: str,
@@ -994,8 +1023,9 @@ class MockConversationSession:
         audio_chunks = 0
         audio_bytes = 0
         try:
+            directed_message = await self._direct_cartesia_text(message, metadata=metadata)
             async for chunk in self.synthesizer.stream_speech(
-                message,
+                directed_message,
                 context_id=generate_cartesia_context_id(response_id),
             ):
                 if chunk["type"] == "error":
@@ -1100,8 +1130,12 @@ class MockConversationSession:
         audio_chunks = 0
         audio_bytes = 0
         try:
+            async def directed_chunks() -> AsyncIterator[str]:
+                async for text in chunks:
+                    yield await self._direct_cartesia_text(text, metadata=metadata)
+
             async for chunk in self.synthesizer.stream_speech_chunks(
-                chunks,
+                directed_chunks(),
                 context_id=generate_cartesia_context_id(response_id),
             ):
                 if chunk["type"] == "error":

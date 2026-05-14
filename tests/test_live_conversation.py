@@ -1126,6 +1126,62 @@ def test_live_cartesia_audio_can_start_before_llm_final_text_event():
     assert spoken_chunks == ["This first sentence can speak now. ", "Second sentence arrives later. "]
 
 
+def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_plain():
+    events = []
+    audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
+    spoken_chunks = []
+
+    class ClarifyingAgent:
+        async def stream_response(self, transcript):
+            yield "Well, I think you meant the Deepgram model is missing words."
+
+    class StreamingSynthesizer:
+        async def stream_speech_chunks(self, chunks, *, context_id):
+            async for chunk in chunks:
+                spoken_chunks.append(chunk)
+                yield {"type": "chunk", "audio": audio, "context_id": context_id}
+            yield {"type": "done", "context_id": context_id, "done": True}
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession(
+            "sess_test",
+            send_event,
+            proactive_settings(
+                normalized_mode="live",
+                groq_api_key="groq-key",
+                cartesia_api_key="cartesia-key",
+                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
+                cartesia_model="sonic-3",
+                cartesia_sample_rate=16000,
+                cartesia_version="2026-03-01",
+                cartesia_speed=1.2,
+                cartesia_speech_director_enabled=True,
+                cartesia_ssml_enabled=True,
+                cartesia_emotion_tags_enabled=False,
+            ),
+        )
+        session.agent = ClarifyingAgent()
+        session.synthesizer = StreamingSynthesizer()
+        await session._run_agent_response("You're what's up can you hear me now")
+
+    asyncio.run(run_session())
+
+    final = next(event for event in events if event["type"] == "agent.text.final")
+    assert final["payload"]["text"] == "Well, I think you meant the Deepgram model is missing words."
+    assert spoken_chunks == [
+        'Well,<break time="180ms"/> I think you meant the Deepgram model is missing words. '
+    ]
+    assert any(
+        event["type"] == "pipeline.stage"
+        and event["payload"].get("stage") == "tts_speech_direction"
+        and event["payload"].get("directed") is True
+        for event in events
+    )
+
+
 def test_deepgram_start_failure_falls_back_to_mock_turn_detection(monkeypatch):
     events = []
 
