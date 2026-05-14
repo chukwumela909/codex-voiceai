@@ -1068,7 +1068,7 @@ class MockConversationSession:
             ):
                 if chunk["type"] == "error":
                     await self.send_provider_error("cartesia", chunk["message"], metadata=metadata)
-                    return audio_chunks > 0
+                    return False
                 if chunk["type"] != "chunk" or not chunk["audio"]:
                     continue
                 if response_id in self.interrupted_response_ids:
@@ -1143,7 +1143,7 @@ class MockConversationSession:
             if self.closed:
                 return True
             await self.send_provider_error("cartesia", str(exc), metadata=metadata)
-            return audio_chunks > 0
+            return False
 
     async def _stream_cartesia_speech_chunks(
         self,
@@ -1178,7 +1178,7 @@ class MockConversationSession:
             ):
                 if chunk["type"] == "error":
                     await self.send_provider_error("cartesia", chunk["message"], metadata=metadata)
-                    return audio_chunks > 0
+                    return False
                 if chunk["type"] != "chunk" or not chunk["audio"]:
                     continue
                 if response_id in self.interrupted_response_ids:
@@ -1255,7 +1255,7 @@ class MockConversationSession:
             if self.closed:
                 return True
             await self.send_provider_error("cartesia", str(exc), metadata=metadata)
-            return audio_chunks > 0
+            return False
 
     async def _stream_mock_speech(
         self,

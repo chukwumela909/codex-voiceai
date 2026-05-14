@@ -1203,6 +1203,47 @@ def test_tts_error_falls_back_to_audible_mock_audio():
     assert audio_events[-1]["payload"]["audio"]
 
 
+def test_cartesia_error_after_audio_chunk_falls_back_to_mock_audio():
+    events = []
+    audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
+
+    class PartiallyFailingSynthesizer:
+        async def stream_speech(self, transcript, *, context_id=None):
+            yield {"type": "chunk", "audio": audio, "context_id": context_id}
+            yield {"type": "error", "message": "cartesia stream failed", "context_id": context_id, "done": True}
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession(
+            "sess_test",
+            send_event,
+            proactive_settings(
+                normalized_mode="live",
+                cartesia_api_key="cartesia-key",
+                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
+                cartesia_model="sonic-3",
+                cartesia_sample_rate=16000,
+                cartesia_version="2026-03-01",
+            ),
+        )
+        session.synthesizer = PartiallyFailingSynthesizer()
+        await session._stream_speech("resp_test", "Hello from Cartesia.", 0)
+
+    asyncio.run(run_session())
+
+    audio_providers = [event["payload"].get("provider") for event in events if event["type"] == "audio.chunk"]
+    assert audio_providers == ["cartesia", "mock"]
+    assert any(event["type"] == "error" and event["payload"].get("provider") == "cartesia" for event in events)
+    assert any(
+        event["type"] == "pipeline.stage"
+        and event["payload"].get("stage") == "tts_fallback"
+        and event["payload"].get("fallback_from") == "cartesia"
+        for event in events
+    )
+
+
 def test_live_cartesia_audio_can_start_before_llm_final_text_event():
     events = []
     audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
