@@ -1182,6 +1182,53 @@ def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_p
     )
 
 
+def test_cartesia_uses_plain_text_when_speech_direction_fails(monkeypatch):
+    events = []
+    audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
+    spoken_messages = []
+
+    class StreamingSynthesizer:
+        async def stream_speech(self, message, *, context_id):
+            spoken_messages.append(message)
+            yield {"type": "chunk", "audio": audio, "context_id": context_id}
+            yield {"type": "done", "context_id": context_id, "done": True}
+
+    def failing_director(text, config):
+        raise RuntimeError("direction unavailable")
+
+    monkeypatch.setattr(mock_conversation, "direct_speech_for_cartesia", failing_director)
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession(
+            "sess_test",
+            send_event,
+            proactive_settings(
+                normalized_mode="live",
+                cartesia_api_key="cartesia-key",
+                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
+                cartesia_model="sonic-3",
+                cartesia_sample_rate=16000,
+                cartesia_version="2026-03-01",
+            ),
+        )
+        session.synthesizer = StreamingSynthesizer()
+        result = await session._stream_cartesia_speech("resp_test", "Set API mode.", 0)
+        assert result is True
+
+    asyncio.run(run_session())
+
+    assert spoken_messages == ["Set API mode."]
+    assert any(
+        event["type"] == "error"
+        and event["payload"].get("provider") == "cartesia"
+        and "Speech direction failed: direction unavailable" in event["payload"].get("message", "")
+        for event in events
+    )
+
+
 def test_deepgram_start_failure_falls_back_to_mock_turn_detection(monkeypatch):
     events = []
 

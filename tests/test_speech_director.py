@@ -31,12 +31,28 @@ def test_director_preserves_existing_ssml_tags():
     assert direct_speech_for_cartesia(text, config) == text
 
 
+def test_director_skips_direction_when_plain_text_has_xml_sensitive_characters():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = "Use R&D API on x < 8000."
+
+    assert direct_speech_for_cartesia(text, config) == text
+
+
 def test_director_spells_code_like_tokens():
     config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
 
     directed = direct_speech_for_cartesia("Set API mode on port 8000.", config)
 
     assert directed == "Set <spell>API</spell> mode on port <spell>8000</spell>."
+
+
+def test_director_does_not_spell_ordinary_hyphenated_words():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = "This follow-up can be a quick check-in on the phone-call flow."
+
+    assert direct_speech_for_cartesia(text, config) == text
 
 
 def test_director_can_be_disabled():

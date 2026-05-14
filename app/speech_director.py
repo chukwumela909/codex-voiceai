@@ -5,7 +5,10 @@ from dataclasses import dataclass
 DISCOURSE_MARKERS = ("Well,", "Hmm,", "Okay,", "Right,", "So,")
 MIN_WORDS_FOR_DISCOURSE_PAUSE = 6
 SSML_TAG_PATTERN = re.compile(r"<[^>]+>")
-SPELLABLE_TOKEN_PATTERN = re.compile(r"\b(?:[A-Z]{2,6}|\d{3,}|\w+-\w+)\b")
+XML_SENSITIVE_TEXT_PATTERN = re.compile(r"[<>&]")
+SPELLABLE_TOKEN_PATTERN = re.compile(
+    r"\b(?:[A-Z]{2,6}|\d{3,}|[A-Za-z0-9_]*[\d_][A-Za-z0-9_-]*|[A-Z]{2,}(?:-[A-Z0-9]{2,})+)\b"
+)
 
 
 @dataclass(frozen=True)
@@ -19,6 +22,8 @@ def direct_speech_for_cartesia(text: str, config: SpeechDirectionConfig) -> str:
     if not config.enabled or not config.ssml_enabled or not text.strip():
         return text
     if SSML_TAG_PATTERN.search(text):
+        return text
+    if XML_SENSITIVE_TEXT_PATTERN.search(text):
         return text
 
     directed = _add_discourse_pause(text)
