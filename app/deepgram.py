@@ -68,7 +68,7 @@ class DeepgramStreamingTranscriber:
         self.closed = True
         if self.websocket:
             await self.websocket.close()
-        if self.receive_task and not self.receive_task.done():
+        if self.receive_task and not self.receive_task.done() and self.receive_task is not asyncio.current_task():
             self.receive_task.cancel()
             try:
                 await self.receive_task

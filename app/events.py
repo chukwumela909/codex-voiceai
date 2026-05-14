@@ -17,6 +17,11 @@ SERVER_EVENT_TYPES = {
     "interruption.started": "User barge-in cancelled an active assistant response.",
     "latency.metric": "Latency span measurement.",
     "pipeline.stage": "Current provider pipeline stage for observability.",
+    "proactive.triggered": "The proactive policy selected an assistant-initiated turn.",
+    "proactive.skipped": "The proactive policy skipped a candidate turn and reported why.",
+    "proactive.cancelled": "Pending proactive work was cancelled by user speech, audio stop, shutdown, or state change.",
+    "proactive.cooldown": "The proactive policy entered or reported a cooldown window.",
+    "proactive.state": "The proactive policy changed or reported its monitoring state.",
     "error": "A recoverable or terminal error occurred.",
     "session.ended": "The WebSocket session is closing or has closed.",
 }

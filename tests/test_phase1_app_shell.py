@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -8,6 +9,10 @@ from app.main import app, log_server_event
 
 
 client = TestClient(app)
+
+
+def mock_speech_frame(sample_count=12000, amplitude=12000):
+    return int(amplitude).to_bytes(2, "little", signed=True) * sample_count
 
 
 def test_health_reports_service_and_config_status():
@@ -21,6 +26,13 @@ def test_health_reports_service_and_config_status():
     assert "missing_live_keys" in body["config"]
     assert "server" in body["config"]
     assert "cors" in body["config"]
+    assert "proactive" in body["config"]
+    assert body["config"]["ambience"] == {
+        "enabled": True,
+        "scene": "room_line",
+        "volume": 0.035,
+    }
+    assert body["config"]["turn_timing"]["partial_idle_finalize_ms"] == 650
 
 
 def test_events_contract_documents_initial_and_planned_events():
@@ -33,8 +45,23 @@ def test_events_contract_documents_initial_and_planned_events():
     assert "audio.input" in body["server"]
     assert "pipeline.stage" in body["server"]
     assert "interruption.started" in body["server"]
+    assert "proactive.triggered" in body["server"]
+    assert "proactive.skipped" in body["server"]
+    assert "proactive.cancelled" in body["server"]
+    assert "proactive.cooldown" in body["server"]
+    assert "proactive.state" in body["server"]
     assert "client.hello" in body["client"]
     assert "audio.start" in body["client"]
+
+
+def test_readme_documents_proactive_tuning():
+    readme = Path("README.md").read_text(encoding="utf-8")
+
+    assert "## Proactive Conversation" in readme
+    assert "VOICE_AGENT_PROACTIVE_ENABLED" in readme
+    assert "proactive.triggered" in readme
+    assert "failure_backoff" in readme
+    assert "generated through Groq" in readme
 
 
 def test_event_logging_includes_operational_stage_and_provider(caplog):
@@ -58,6 +85,54 @@ def test_event_logging_includes_operational_stage_and_provider(caplog):
     assert "response_id=resp_test" in caplog.text
 
 
+def test_event_logging_includes_proactive_decisions(caplog):
+    caplog.set_level("INFO", logger="voice_agent")
+
+    log_server_event(
+        {
+            "type": "proactive.skipped",
+            "session_id": "sess_test",
+            "payload": {
+                "trigger_reason": "silence_nudge",
+                "skip_reason": "cooldown",
+                "source_state": "listening",
+            },
+        }
+    )
+
+    assert "event=proactive.skipped" in caplog.text
+    assert "trigger=silence_nudge" in caplog.text
+    assert "skip_reason=cooldown" in caplog.text
+
+
+def test_event_logging_includes_proactive_tuning_fields(caplog):
+    caplog.set_level("INFO", logger="voice_agent")
+
+    log_server_event(
+        {
+            "type": "proactive.cooldown",
+            "session_id": "sess_test",
+            "payload": {
+                "trigger_reason": "contextual_follow_up",
+                "cooldown_ms": 30000,
+                "next_eligible_at_ms": 123456,
+                "reason": "failure_backoff",
+                "proactive_failures": 2,
+                "failure_backoff_threshold": 2,
+                "consecutive_prompts": 3,
+            },
+        }
+    )
+
+    assert "event=proactive.cooldown" in caplog.text
+    assert "trigger=contextual_follow_up" in caplog.text
+    assert "cooldown_ms=30000" in caplog.text
+    assert "next_eligible_at_ms=123456" in caplog.text
+    assert "proactive_failures=2" in caplog.text
+    assert "failure_backoff_threshold=2" in caplog.text
+    assert "consecutive_prompts=3" in caplog.text
+
+
 def test_browser_websocket_starts_session_and_accepts_hello():
     with client.websocket_connect("/ws/browser") as websocket:
         started = websocket.receive_json()
@@ -65,6 +140,12 @@ def test_browser_websocket_starts_session_and_accepts_hello():
 
         assert started["type"] == "session.started"
         assert started["session_id"].startswith("sess_")
+        assert started["payload"]["ambience"] == {
+            "enabled": True,
+            "scene": "room_line",
+            "volume": 0.035,
+        }
+        assert started["payload"]["turn_timing"]["partial_idle_finalize_ms"] == 650
         assert connected["type"] == "status.changed"
         assert connected["payload"]["state"] == "connected"
 
@@ -96,7 +177,7 @@ def test_browser_websocket_mock_audio_loop_emits_transcript_agent_audio_and_late
         assert listening["type"] == "status.changed"
         assert listening["payload"]["state"] == "listening"
 
-        websocket.send_bytes(b"\x00\x00" * 12000)
+        websocket.send_bytes(mock_speech_frame())
 
         seen_types = []
         response_id = None

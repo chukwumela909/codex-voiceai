@@ -66,9 +66,11 @@ def pop_speakable_chunks(buffer: str, *, force: bool = False) -> tuple[list[str]
     chunks: list[str] = []
     cursor = 0
     punctuation = ".!?\n"
+    min_punctuated_chars = 18
+    max_unpunctuated_chars = 70
 
     for index, char in enumerate(buffer):
-        if char in punctuation and index + 1 - cursor >= 24:
+        if char in punctuation and index + 1 - cursor >= min_punctuated_chars:
             chunks.append(buffer[cursor : index + 1].strip() + " ")
             cursor = index + 1
 
@@ -76,8 +78,8 @@ def pop_speakable_chunks(buffer: str, *, force: bool = False) -> tuple[list[str]
     if force and remainder.strip():
         chunks.append(remainder.strip())
         remainder = ""
-    elif len(remainder) >= 90:
-        split_at = remainder.rfind(" ", 0, 90)
+    elif len(remainder) >= max_unpunctuated_chars:
+        split_at = remainder.rfind(" ", 0, max_unpunctuated_chars)
         if split_at > 32:
             chunks.append(remainder[:split_at].strip() + " ")
             remainder = remainder[split_at:]

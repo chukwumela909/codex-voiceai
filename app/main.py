@@ -57,12 +57,21 @@ def log_server_event(payload: dict) -> None:
         "latency.metric",
         "error",
         "interruption.started",
+        "proactive.triggered",
+        "proactive.skipped",
+        "proactive.cancelled",
+        "proactive.cooldown",
+        "proactive.state",
         "session.ended",
     }:
         return
 
     logger.info(
-        "event=%s state=%s stage=%s provider=%s response_id=%s latency_ms=%s reason=%s message=%s",
+        (
+            "event=%s state=%s stage=%s provider=%s response_id=%s latency_ms=%s reason=%s "
+            "trigger=%s skip_reason=%s cooldown_ms=%s next_eligible_at_ms=%s proactive_failures=%s "
+            "failure_backoff_threshold=%s consecutive_prompts=%s message=%s"
+        ),
         event_type,
         event_payload.get("state", "-"),
         event_payload.get("stage", "-"),
@@ -70,6 +79,13 @@ def log_server_event(payload: dict) -> None:
         event_payload.get("response_id") or event_payload.get("interrupted_response_id", "-"),
         event_payload.get("value_ms", "-"),
         event_payload.get("reason", "-"),
+        event_payload.get("trigger_reason", "-"),
+        event_payload.get("skip_reason", "-"),
+        event_payload.get("cooldown_ms", "-"),
+        event_payload.get("next_eligible_at_ms", "-"),
+        event_payload.get("proactive_failures", "-"),
+        event_payload.get("failure_backoff_threshold", "-"),
+        event_payload.get("consecutive_prompts", "-"),
         event_payload.get("message", "-"),
         extra={"session_id": payload.get("session_id", "-")},
     )
@@ -123,6 +139,7 @@ async def browser_ws(websocket: WebSocket) -> None:
             raise
 
     conversation = MockConversationSession(session_id, send_event_to_client, settings)
+    config_status = settings.public_config_status()
     log_info("browser websocket accepted", session_id=session_id)
 
     await send_server_event(
@@ -133,6 +150,8 @@ async def browser_ws(websocket: WebSocket) -> None:
             {
                 "mode": settings.normalized_mode,
                 "event_contract_url": "/events",
+                "ambience": config_status["ambience"],
+                "turn_timing": config_status["turn_timing"],
                 "audio_contract": {
                     "inbound_preferred_encoding": "pcm_s16le",
                     "channels": 1,
@@ -143,16 +162,18 @@ async def browser_ws(websocket: WebSocket) -> None:
     )
     await send_server_event(websocket, event("status.changed", session_id, {"state": "connected"}))
 
-    missing = settings.public_config_status()["missing_live_keys"]
-    if missing:
+    missing = config_status["missing_live_keys"]
+    invalid = config_status.get("invalid_live_keys", [])
+    if missing or invalid:
         await send_server_event(
             websocket,
             event(
                 "config.warning",
                 session_id,
                 {
-                    "message": "Live mode is selected, but required provider keys are missing.",
+                    "message": "Live mode is selected, but required provider configuration is missing or invalid.",
                     "missing": missing,
+                    "invalid": invalid,
                 },
             )
         )
@@ -204,6 +225,7 @@ async def handle_text_message(websocket: WebSocket, conversation: MockConversati
         return True
 
     if message_type == "audio.stop":
+        await conversation.stop_audio()
         await send_server_event(websocket, event("status.changed", session_id, {"state": "connected"}))
         return True
 

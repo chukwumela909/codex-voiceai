@@ -1,53 +1,96 @@
+import asyncio
+import base64
 import json
 
-from app.cartesia_tts import generate_cartesia_context_id, parse_cartesia_message
+import app.cartesia_tts as cartesia_tts
+from app.cartesia_tts import CartesiaStreamingTTS
 
 
-def test_parse_cartesia_chunk_message():
-    parsed = parse_cartesia_message(
-        json.dumps(
-            {
-                "type": "chunk",
-                "data": "YWJj",
-                "done": False,
-                "context_id": "ctx_123",
-            }
-        )
+def test_generation_request_includes_speed_and_continuation_flag():
+    synthesizer = CartesiaStreamingTTS(
+        api_key="cartesia-key",
+        model_id="sonic-3",
+        voice_id="voice-id",
+        sample_rate=16000,
+        cartesia_version="2026-03-01",
+        speed=1.2,
     )
 
-    assert parsed == {
-        "type": "chunk",
-        "audio": "YWJj",
-        "context_id": "ctx_123",
-        "done": False,
-    }
+    request = synthesizer._generation_request("Hello.", "ctx_test", continue_=True)
+
+    assert request["generation_config"] == {"speed": 1.2}
+    assert request["continue"] is True
 
 
-def test_parse_cartesia_done_message():
-    parsed = parse_cartesia_message(json.dumps({"type": "done", "done": True, "context_id": "ctx_123"}))
+def test_stream_speech_chunks_sends_continuations_before_final(monkeypatch):
+    audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
 
-    assert parsed == {
-        "type": "done",
-        "context_id": "ctx_123",
-        "done": True,
-    }
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent = []
+            self.inbound = asyncio.Queue()
 
+        async def send(self, message):
+            request = json.loads(message)
+            self.sent.append(request)
+            if request["transcript"]:
+                await self.inbound.put(
+                    json.dumps(
+                        {
+                            "type": "chunk",
+                            "data": audio,
+                            "context_id": request["context_id"],
+                        }
+                    )
+                )
+            if request["continue"] is False:
+                await self.inbound.put(json.dumps({"type": "done", "context_id": request["context_id"]}))
 
-def test_parse_cartesia_error_message():
-    parsed = parse_cartesia_message(json.dumps({"type": "error", "error": "bad voice", "done": True}))
+        def __aiter__(self):
+            return self
 
-    assert parsed["type"] == "error"
-    assert parsed["message"] == "bad voice"
-    assert parsed["done"] is True
+        async def __anext__(self):
+            return await self.inbound.get()
 
+    class FakeConnect:
+        def __init__(self, websocket):
+            self.websocket = websocket
 
-def test_parse_cartesia_error_message_field():
-    parsed = parse_cartesia_message(json.dumps({"type": "error", "message": "bad api key", "done": True}))
+        async def __aenter__(self):
+            return self.websocket
 
-    assert parsed["type"] == "error"
-    assert parsed["message"] == "bad api key"
-    assert parsed["done"] is True
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
 
+    fake_websocket = FakeWebSocket()
+    monkeypatch.setattr(cartesia_tts.websockets, "connect", lambda *args, **kwargs: FakeConnect(fake_websocket))
 
-def test_generate_cartesia_context_id_matches_response_id():
-    assert generate_cartesia_context_id("resp_abc") == "ctx_abc"
+    async def input_chunks():
+        yield "First sentence. "
+        await asyncio.sleep(0)
+        yield "Second sentence."
+
+    async def run_stream():
+        synthesizer = CartesiaStreamingTTS(
+            api_key="cartesia-key",
+            model_id="sonic-3",
+            voice_id="voice-id",
+            sample_rate=16000,
+            cartesia_version="2026-03-01",
+            speed=1.2,
+        )
+        messages = []
+        async for message in synthesizer.stream_speech_chunks(input_chunks(), context_id="ctx_test"):
+            messages.append(message)
+        return messages
+
+    messages = asyncio.run(run_stream())
+
+    assert [request["transcript"] for request in fake_websocket.sent] == [
+        "First sentence. ",
+        "Second sentence.",
+        "",
+    ]
+    assert [request["continue"] for request in fake_websocket.sent] == [True, True, False]
+    assert all(request["generation_config"] == {"speed": 1.2} for request in fake_websocket.sent)
+    assert [message["type"] for message in messages] == ["chunk", "chunk", "done"]

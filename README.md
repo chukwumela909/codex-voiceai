@@ -54,14 +54,59 @@ Server:
 Provider tuning:
 
 - `DEEPGRAM_MODEL`, default `nova-3`
-- `DEEPGRAM_ENDPOINTING_MS`, default `300`
-- `DEEPGRAM_UTTERANCE_END_MS`, default `1000`
+- `DEEPGRAM_ENDPOINTING_MS`, default `220`
+- `DEEPGRAM_UTTERANCE_END_MS`, default `700`
+- `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS`, default `650`; fallback debounce for useful partial transcripts when Deepgram has not emitted `speech_final`
 - `GROQ_MODEL`, default `llama-3.1-8b-instant`
 - `GROQ_TEMPERATURE`, default `0.7`
 - `CARTESIA_MODEL`, default `sonic-3`
+- `CARTESIA_SPEED`, default `1.2` (`0.6` to `1.5`; higher is faster)
 - `CARTESIA_SAMPLE_RATE`, default `16000`
 - `CARTESIA_VERSION`, default `2026-03-01`
 - `VOICE_AGENT_PERSONA`
+
+Phone-call ambience:
+
+- `VOICE_AGENT_AMBIENCE_ENABLED`, default `true`
+- `VOICE_AGENT_AMBIENCE_SCENE`, default `room_line`
+- `VOICE_AGENT_AMBIENCE_VOLUME`, default `0.035`
+
+The ambience bed is generated in the browser with Web Audio after microphone permission is granted. It is connected only to local playback, never sent to Deepgram, never mixed into assistant `audio.chunk` events, and ramps down when the mic or session stops.
+
+Proactive conversation tuning:
+
+- `VOICE_AGENT_PROACTIVE_ENABLED`: `auto`, `true`, or `false`. `auto` enables proactive behavior in mock mode and keeps live mode opt-in.
+- `VOICE_AGENT_PROACTIVE_GREETING_DELAY_MS`: startup greeting delay after the first inbound audio frame, default `500`.
+- `VOICE_AGENT_PROACTIVE_SILENCE_TIMEOUT_MS`: idle delay before a proactive silence nudge or contextual follow-up. If unset, mock mode defaults to `5000`; live mode defaults to `30000`.
+- `VOICE_AGENT_PROACTIVE_REPEAT_COOLDOWN_MS`: delay between repeated proactive prompts. If unset, mock mode defaults to `8000`; live mode defaults to `60000`.
+- `VOICE_AGENT_PROACTIVE_MAX_CONSECUTIVE_PROMPTS`: maximum proactive prompts before backing off until the user speaks. If unset, mock mode defaults to `3`; live mode defaults to `1`.
+- `VOICE_AGENT_PROACTIVE_FAILURE_BACKOFF_THRESHOLD`: provider failures before proactive failure backoff, default `2`.
+- `VOICE_AGENT_PROACTIVE_FAILURE_BACKOFF_MS`: observable cooldown duration after failure_backoff, default `30000`.
+- `VOICE_AGENT_PROACTIVE_CONTEXTUAL_FOLLOWUPS_ENABLED`: lets the idle policy choose contextual follow-ups when recent user context exists, default `true`.
+
+## Proactive Conversation
+
+Proactive behavior makes the agent feel present without waiting forever for a user event. It uses the same assistant response slot, transcript, TTS path, interruption logic, and `response_id` stale-output protection as normal user-driven turns. The default persona and proactive instructions frame the experience as an ambiguous open phone call: warm, brief, and still on the line without implying who called whom.
+
+In mock mode the defaults are demo-ready: after audio starts and the backend receives the first audio frame, the agent sends deterministic mock proactive text. If the user stays quiet, the same idle scheduler waits 5 seconds, then chooses either a mock silence nudge or a mock contextual follow-up. Repeated nudges use the repeat cooldown so they do not stack rapidly.
+
+In live mode, `VOICE_AGENT_PROACTIVE_ENABLED=auto` keeps proactive behavior disabled. Set `VOICE_AGENT_PROACTIVE_ENABLED=true` to opt in. When Groq is configured, proactive startup greetings, silence nudges, and contextual follow-ups are generated through Groq with short internal instructions, while Groq still applies the configured `VOICE_AGENT_PERSONA`. Scripted proactive copy is used only for mock mode or provider fallback.
+
+Proactive diagnostics:
+
+- `proactive.triggered`: a proactive turn was allowed. Payload includes `trigger_reason`, `source_state`, prompt counts, and failure counts.
+- `proactive.skipped`: a candidate turn was blocked. `skip_reason` explains why, such as `cooldown`, `active_response`, `question_already_pending`, or `failure_backoff`.
+- `proactive.cancelled`: pending proactive work was cancelled by user speech, audio stop, shutdown, or test/setup state.
+- `proactive.cooldown`: reports cooldown and backoff windows, including `cooldown_ms`, `next_eligible_at_ms`, and failure counts when relevant.
+- `proactive.state`: reports idle monitoring and backed-off states.
+
+Tuning guidance:
+
+- For local demos, keep the 5 second silence timeout and 8 second repeat cooldown.
+- For live demos, opt in deliberately and watch `proactive.skipped`, `proactive.cooldown`, and `proactive.state` logs.
+- Lower `VOICE_AGENT_PROACTIVE_MAX_CONSECUTIVE_PROMPTS` if the agent feels too eager.
+- Raise `VOICE_AGENT_PROACTIVE_SILENCE_TIMEOUT_MS` when real callers need more thinking time.
+- Keep failure backoff enabled so provider problems do not create repeated proactive retries.
 
 ## Routes
 
@@ -92,6 +137,27 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
       "stt": "deepgram",
       "llm": "groq",
       "tts": "cartesia"
+    },
+    "ambience": {
+      "enabled": true,
+      "scene": "room_line",
+      "volume": 0.035
+    },
+    "turn_timing": {
+      "deepgram_endpointing_ms": 220,
+      "deepgram_utterance_end_ms": 700,
+      "partial_idle_finalize_ms": 650
+    },
+    "proactive": {
+      "configured": "auto",
+      "enabled": false,
+      "startup_greeting_delay_ms": 500,
+      "silence_timeout_ms": 5000,
+      "repeat_cooldown_ms": 8000,
+      "max_consecutive_prompts": 3,
+      "failure_backoff_threshold": 2,
+      "failure_backoff_ms": 30000,
+      "contextual_followups_enabled": true
     }
   }
 }
@@ -116,6 +182,11 @@ Server events include:
 - `interruption.started`
 - `latency.metric`
 - `pipeline.stage`
+- `proactive.triggered`
+- `proactive.skipped`
+- `proactive.cancelled`
+- `proactive.cooldown`
+- `proactive.state`
 - `error`
 - `session.ended`
 
@@ -137,6 +208,7 @@ The server writes structured-ish operational log lines for:
 - provider pipeline stages
 - latency metrics
 - interruption events
+- proactive trigger, skip, cancellation, cooldown, and backoff events
 - client-visible errors
 
 Each conversation log line includes a `session_id`.
@@ -164,4 +236,4 @@ Coolify notes:
 pytest
 ```
 
-The suite covers config loading, safe health reporting, WebSocket startup/shutdown, provider adapters, turn detection, interruption behavior, and event logging.
+The suite covers config loading, safe health reporting, WebSocket startup/shutdown, provider adapters, turn detection, proactive startup greetings, silence nudges, contextual follow-ups, interruption behavior, provider failure backoff, and event logging.

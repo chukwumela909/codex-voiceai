@@ -26,3 +26,13 @@ def test_pop_speakable_chunks_force_flushes_remainder():
 
     assert chunks == ["A short final phrase"]
     assert remainder == ""
+
+
+def test_pop_speakable_chunks_releases_long_phone_call_phrase_before_full_sentence():
+    text = "We can keep the line moving with a short thought before the sentence fully ends"
+    split_at = text.rfind(" ", 0, 70)
+
+    chunks, remainder = pop_speakable_chunks(text)
+
+    assert chunks == [text[:split_at].strip() + " "]
+    assert remainder == text[split_at:]

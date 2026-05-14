@@ -60,6 +60,8 @@ let targetMicFrameBytes = 640;
 let playbackTime = 0;
 let activeSources = [];
 let activeResponseId = null;
+let ambienceConfig = { enabled: true, scene: "room_line", volume: 0.035 };
+let ambienceNodes = null;
 
 // ---- High-level UX state ----
 let appState = "idle";
@@ -189,6 +191,9 @@ function recordEvent(event) {
 
   if (event.type === "session.started" && event.payload?.mode) {
     mode.textContent = event.payload.mode;
+    if (event.payload.ambience) {
+      configureAmbience(event.payload.ambience);
+    }
   }
 
   if (event.type === "status.changed" && event.payload?.state) {
@@ -379,6 +384,135 @@ function disconnect() {
 }
 
 // ============================================================
+// Local ambience bed
+// ============================================================
+
+function configureAmbience(config) {
+  const nextVolume = Number(config.volume ?? ambienceConfig.volume);
+  ambienceConfig = {
+    enabled: config.enabled !== false,
+    scene: typeof config.scene === "string" && config.scene.trim() ? config.scene.trim() : "room_line",
+    volume: Number.isFinite(nextVolume) ? Math.max(0, Math.min(0.2, nextVolume)) : 0.035
+  };
+
+  if (!ambienceConfig.enabled) {
+    stopAmbience();
+    return;
+  }
+
+  if (ambienceNodes?.master) {
+    const now = ambienceNodes.context.currentTime;
+    ambienceNodes.master.gain.cancelScheduledValues(now);
+    ambienceNodes.master.gain.setTargetAtTime(ambienceConfig.volume, now, 0.25);
+  } else if (micStream && audioContext) {
+    startAmbience();
+  }
+}
+
+function ambienceSeedForScene(scene) {
+  let seed = 2166136261;
+  for (let i = 0; i < scene.length; i += 1) {
+    seed ^= scene.charCodeAt(i);
+    seed = Math.imul(seed, 16777619);
+  }
+  return seed >>> 0;
+}
+
+function createAmbienceBuffer(context, scene) {
+  const durationSeconds = 2.5;
+  const length = Math.max(1, Math.floor(context.sampleRate * durationSeconds));
+  const buffer = context.createBuffer(1, length, context.sampleRate);
+  const channel = buffer.getChannelData(0);
+  let state = ambienceSeedForScene(scene);
+  let room = 0;
+
+  for (let i = 0; i < length; i += 1) {
+    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+    const white = (state / 4294967295) * 2 - 1;
+    room = room * 0.88 + white * 0.12;
+    channel[i] = room * 0.5 + white * 0.035;
+  }
+
+  return buffer;
+}
+
+function startAmbience() {
+  const context = audioContext;
+  if (!context || ambienceNodes || !ambienceConfig.enabled || ambienceConfig.volume <= 0) return;
+  if (context.state === "suspended") context.resume();
+
+  const source = context.createBufferSource();
+  const roomHighpass = context.createBiquadFilter();
+  const roomLowpass = context.createBiquadFilter();
+  const lineBandpass = context.createBiquadFilter();
+  const lineGain = context.createGain();
+  const master = context.createGain();
+  const now = context.currentTime;
+
+  source.buffer = createAmbienceBuffer(context, ambienceConfig.scene);
+  source.loop = true;
+
+  roomHighpass.type = "highpass";
+  roomHighpass.frequency.value = 70;
+  roomHighpass.Q.value = 0.5;
+
+  roomLowpass.type = "lowpass";
+  roomLowpass.frequency.value = 950;
+  roomLowpass.Q.value = 0.7;
+
+  lineBandpass.type = "bandpass";
+  lineBandpass.frequency.value = 1750;
+  lineBandpass.Q.value = 2.4;
+
+  lineGain.gain.value = 0.22;
+  master.gain.setValueAtTime(0, now);
+  master.gain.linearRampToValueAtTime(ambienceConfig.volume, now + 1.2);
+
+  source.connect(roomHighpass);
+  roomHighpass.connect(roomLowpass);
+  roomLowpass.connect(master);
+  source.connect(lineBandpass);
+  lineBandpass.connect(lineGain);
+  lineGain.connect(master);
+  master.connect(context.destination);
+  source.start(now);
+
+  ambienceNodes = {
+    context,
+    source,
+    roomHighpass,
+    roomLowpass,
+    lineBandpass,
+    lineGain,
+    master
+  };
+}
+
+function stopAmbience() {
+  if (!ambienceNodes) return;
+  const nodes = ambienceNodes;
+  ambienceNodes = null;
+
+  const now = nodes.context.currentTime;
+  nodes.master.gain.cancelScheduledValues(now);
+  nodes.master.gain.setTargetAtTime(0, now, 0.12);
+
+  try {
+    nodes.source.stop(now + 0.5);
+  } catch {
+    /* already stopped */
+  }
+
+  window.setTimeout(() => {
+    Object.values(nodes).forEach((node) => {
+      if (node && typeof node.disconnect === "function") {
+        try { node.disconnect(); } catch { /* already disconnected */ }
+      }
+    });
+  }, 650);
+}
+
+// ============================================================
 // Microphone / capture
 // ============================================================
 
@@ -424,10 +558,13 @@ async function toggleMic() {
   micSource.connect(processor);
   processor.connect(silentMicGain);
   silentMicGain.connect(audioContext.destination);
+  startAmbience();
   setMicState("streaming");
 }
 
 function stopMic() {
+  stopAmbience();
+
   if (socket?.readyState === WebSocket.OPEN && micStream) {
     socket.send(JSON.stringify({ type: "audio.stop", payload: {} }));
   }
