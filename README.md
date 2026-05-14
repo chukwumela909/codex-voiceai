@@ -55,14 +55,18 @@ Provider tuning:
 
 - `DEEPGRAM_MODEL`, default `nova-3`
 - `DEEPGRAM_ENDPOINTING_MS`, default `220`
-- `DEEPGRAM_UTTERANCE_END_MS`, default `700`
-- `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS`, default `650`; fallback debounce for useful partial transcripts when Deepgram has not emitted `speech_final`
+- `DEEPGRAM_UTTERANCE_END_MS`, default `1000`
+- `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS`, default `1000`; fallback debounce for useful partial transcripts when Deepgram has not emitted `speech_final`
+- `VOICE_AGENT_INTENT_INFERENCE_ENABLED`, default `true`; keeps raw transcripts visible while adding hidden Groq guidance to infer likely intent from recent context
 - `GROQ_MODEL`, default `llama-3.1-8b-instant`
 - `GROQ_TEMPERATURE`, default `0.7`
 - `CARTESIA_MODEL`, default `sonic-3`
 - `CARTESIA_SPEED`, default `1.2` (`0.6` to `1.5`; higher is faster)
 - `CARTESIA_SAMPLE_RATE`, default `16000`
 - `CARTESIA_VERSION`, default `2026-03-01`
+- `VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED`, default `true`
+- `VOICE_AGENT_CARTESIA_SSML_ENABLED`, default `true`
+- `VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED`, default `false`
 - `VOICE_AGENT_PERSONA`
 
 Phone-call ambience:
@@ -72,6 +76,14 @@ Phone-call ambience:
 - `VOICE_AGENT_AMBIENCE_VOLUME`, default `0.035`
 
 The ambience bed is generated in the browser with Web Audio after microphone permission is granted. It is connected only to local playback, never sent to Deepgram, never mixed into assistant `audio.chunk` events, and ramps down when the mic or session stops.
+
+## Contextual Speech
+
+Live mode preserves raw Deepgram transcripts in `transcript.partial`, `transcript.final`, logs, and stored conversation turns. When `VOICE_AGENT_INTENT_INFERENCE_ENABLED=true`, the Groq request also receives hidden guidance that the latest user turn may include speech-to-text errors, so it should infer likely intent from recent context and ask a short clarifying question only when ambiguity blocks a useful answer.
+
+`VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS` controls the app fallback used when Deepgram has not emitted `speech_final`. The default is `1000ms` to leave more room for natural thinking pauses. Lower it for snappier demos; raise it when the assistant interrupts too early.
+
+When Cartesia is configured, `VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED=true` applies conservative SSML-style speech direction to TTS input only. Frontend assistant text stays plain. The first version adds short context-relevant pauses after discourse markers, pauses before inferred clarifications, and spells code-like tokens such as API names or numeric IDs. Emotion tags are disabled by default with `VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED=false`.
 
 Proactive conversation tuning:
 
@@ -138,6 +150,16 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
       "llm": "groq",
       "tts": "cartesia"
     },
+    "conversation": {
+      "intent_inference_enabled": true
+    },
+    "cartesia": {
+      "speech_direction": {
+        "enabled": true,
+        "ssml_enabled": true,
+        "emotion_tags_enabled": false
+      }
+    },
     "ambience": {
       "enabled": true,
       "scene": "room_line",
@@ -145,8 +167,8 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
     },
     "turn_timing": {
       "deepgram_endpointing_ms": 220,
-      "deepgram_utterance_end_ms": 700,
-      "partial_idle_finalize_ms": 650
+      "deepgram_utterance_end_ms": 1000,
+      "partial_idle_finalize_ms": 1000
     },
     "proactive": {
       "configured": "auto",
