@@ -96,6 +96,13 @@ def parse_deepgram_message(raw_message: str | bytes) -> dict | None:
         raw_message = raw_message.decode("utf-8")
 
     data = json.loads(raw_message)
+    if data.get("type") == "SpeechStarted":
+        return {
+            "type": "speech_started",
+            "timestamp": data.get("timestamp"),
+            "provider": "deepgram",
+        }
+
     if data.get("type") == "UtteranceEnd":
         return {
             "type": "utterance_end",

@@ -134,6 +134,29 @@ def test_event_logging_includes_proactive_tuning_fields(caplog):
     assert "consecutive_prompts=3" in caplog.text
 
 
+def test_event_logging_includes_audio_input_levels(caplog):
+    caplog.set_level("INFO", logger="voice_agent")
+
+    log_server_event(
+        {
+            "type": "audio.input",
+            "session_id": "sess_test",
+            "payload": {
+                "rms": 0.045,
+                "peak": 0.12,
+                "raw_rms": 0.022,
+                "raw_peak": 0.06,
+                "input_gain": 2.0,
+            },
+        }
+    )
+
+    assert "event=audio.input" in caplog.text
+    assert "rms=0.045" in caplog.text
+    assert "raw_rms=0.022" in caplog.text
+    assert "input_gain=2.0" in caplog.text
+
+
 def test_browser_websocket_starts_session_and_accepts_hello():
     with client.websocket_connect("/ws/browser") as websocket:
         started = websocket.receive_json()

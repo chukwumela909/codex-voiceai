@@ -85,7 +85,7 @@ def test_parse_deepgram_utterance_end():
     }
 
 
-def test_parse_deepgram_non_transcript_control_event_is_ignored():
+def test_parse_deepgram_speech_started():
     parsed = parse_deepgram_message(
         json.dumps(
             {
@@ -96,4 +96,8 @@ def test_parse_deepgram_non_transcript_control_event_is_ignored():
         )
     )
 
-    assert parsed is None
+    assert parsed == {
+        "type": "speech_started",
+        "timestamp": 0.64,
+        "provider": "deepgram",
+    }

@@ -5,9 +5,27 @@ from types import SimpleNamespace
 
 import app.mock_conversation as mock_conversation
 from app.exceptions import ClientConnectionClosed
-from app.mock_conversation import MockConversationSession
+from app.mock_conversation import MockConversationSession, apply_pcm_gain, calculate_pcm_level
 
 VALID_CARTESIA_VOICE_ID = "6bf6d6c3-9d45-48fb-94a9-4840f83eb385"
+
+
+def test_apply_pcm_gain_amplifies_quiet_audio_without_changing_frame_size():
+    quiet_frame = int(1000).to_bytes(2, "little", signed=True) + int(-1000).to_bytes(2, "little", signed=True)
+
+    boosted = apply_pcm_gain(quiet_frame, 2.5)
+
+    assert boosted == int(2500).to_bytes(2, "little", signed=True) + int(-2500).to_bytes(2, "little", signed=True)
+    assert len(boosted) == len(quiet_frame)
+    assert calculate_pcm_level(boosted)["rms"] > calculate_pcm_level(quiet_frame)["rms"]
+
+
+def test_apply_pcm_gain_clips_to_pcm_range():
+    loud_frame = int(20000).to_bytes(2, "little", signed=True) + int(-20000).to_bytes(2, "little", signed=True)
+
+    boosted = apply_pcm_gain(loud_frame, 3.0)
+
+    assert boosted == int(32767).to_bytes(2, "little", signed=True) + int(-32768).to_bytes(2, "little", signed=True)
 
 
 def test_proactive_source_does_not_embed_canned_greeting_terms():
@@ -131,6 +149,112 @@ def test_live_agent_receives_hidden_intent_inference_context_but_events_keep_raw
         {"role": "user", "content": "You're what's up can you hear me now"},
         {"role": "assistant", "content": "I understood the intent from context."},
     ]
+
+
+def test_live_speech_started_marks_hearing_and_cancels_pending_proactive_prompt():
+    events = []
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession(
+            "sess_test",
+            send_event,
+            proactive_settings(
+                normalized_mode="live",
+                proactive_effective_enabled=True,
+                proactive_startup_greeting_delay_ms=100,
+            ),
+        )
+        session.audio_stream_active = True
+        session.received_audio_frame = True
+
+        await session._maybe_schedule_startup_greeting()
+        assert session.pending_proactive_task is not None
+
+        await session.handle_live_transcript(
+            {
+                "type": "speech_started",
+                "timestamp": 0.64,
+                "provider": "deepgram",
+            }
+        )
+
+        assert session.user_has_spoken is True
+        assert session.pending_proactive_task is None
+        await session.close()
+
+    asyncio.run(run_session())
+
+    assert any(
+        event["type"] == "status.changed" and event["payload"].get("state") == "hearing"
+        for event in events
+    )
+    assert any(
+        event["type"] == "pipeline.stage"
+        and event["payload"].get("stage") == "stt_speech_started"
+        and event["payload"].get("timestamp") == 0.64
+        for event in events
+    )
+    cancellation = next(event for event in events if event["type"] == "proactive.cancelled")
+    assert cancellation["payload"]["reason"] == "live_speech_started"
+
+
+def test_live_speech_started_does_not_interrupt_active_response_before_transcript_text():
+    events = []
+    response_started = asyncio.Event()
+    release_response = asyncio.Event()
+
+    settings = proactive_settings(
+        normalized_mode="live",
+        groq_api_key="test-key",
+        proactive_effective_enabled=False,
+    )
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession("sess_test", send_event, settings)
+
+        async def stream_response(response_id):
+            response_started.set()
+            await release_response.wait()
+            await session._emit_agent_text_chunks(response_id, ["Still answering. "])
+            return "Still answering."
+
+        session._stream_live_agent_response = stream_response
+
+        await session.handle_live_transcript(
+            {
+                "text": "First question",
+                "confidence": 0.99,
+                "is_final": True,
+                "speech_final": True,
+                "provider": "deepgram",
+            }
+        )
+        await asyncio.wait_for(response_started.wait(), timeout=0.15)
+
+        await session.handle_live_transcript(
+            {
+                "type": "speech_started",
+                "timestamp": 1.2,
+                "provider": "deepgram",
+            }
+        )
+
+        assert session.current_task is not None
+        assert not session.current_task.done()
+        assert "interruption.started" not in [event["type"] for event in events]
+
+        release_response.set()
+        assert session.current_task is not None
+        await session.current_task
+        await session.close()
+
+    asyncio.run(run_session())
 
 
 def proactive_settings(**overrides):
@@ -1287,6 +1411,65 @@ def test_cartesia_uses_plain_text_when_speech_direction_fails(monkeypatch):
         and "Speech direction failed: direction unavailable" in event["payload"].get("message", "")
         for event in events
     )
+
+
+def test_live_audio_input_gain_boosts_frames_before_deepgram(monkeypatch):
+    events = []
+    transcribers = []
+
+    class CapturingTranscriber:
+        def __init__(self, **kwargs):
+            self.sent_frames = []
+            transcribers.append(self)
+
+        async def start(self):
+            pass
+
+        async def send_audio(self, frame):
+            self.sent_frames.append(frame)
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(mock_conversation, "DeepgramStreamingTranscriber", CapturingTranscriber)
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession(
+            "sess_test",
+            send_event,
+            proactive_settings(
+                normalized_mode="live",
+                proactive_effective_enabled=False,
+                deepgram_api_key="deepgram-key",
+                deepgram_model="nova-3",
+                deepgram_endpointing_ms=300,
+                deepgram_utterance_end_ms=1000,
+                input_gain=2.5,
+            ),
+        )
+        await session.configure_audio(
+            {
+                "encoding": "pcm_s16le",
+                "sample_rate": 16000,
+                "channels": 1,
+                "frame_duration_ms": 20,
+            }
+        )
+        await session.receive_audio(int(1000).to_bytes(2, "little", signed=True) * 320)
+        await session.close()
+
+    asyncio.run(run_session())
+
+    assert transcribers
+    assert transcribers[0].sent_frames
+    assert transcribers[0].sent_frames[0] == int(2500).to_bytes(2, "little", signed=True) * 320
+
+    audio_input = next(event for event in events if event["type"] == "audio.input")
+    assert audio_input["payload"]["input_gain"] == 2.5
+    assert audio_input["payload"]["raw_rms"] < audio_input["payload"]["rms"]
 
 
 def test_deepgram_start_failure_falls_back_to_mock_turn_detection(monkeypatch):

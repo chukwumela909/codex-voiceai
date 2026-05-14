@@ -57,6 +57,7 @@ Provider tuning:
 - `DEEPGRAM_ENDPOINTING_MS`, default `220`
 - `DEEPGRAM_UTTERANCE_END_MS`, default `1000`
 - `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS`, default `1000`; fallback debounce for useful partial transcripts when Deepgram has not emitted `speech_final`
+- `VOICE_AGENT_INPUT_GAIN`, default `2.0`; server-side PCM gain applied before STT for quiet microphones
 - `VOICE_AGENT_INTENT_INFERENCE_ENABLED`, default `true`; keeps raw transcripts visible while adding hidden Groq guidance to infer likely intent from recent context
 - `GROQ_MODEL`, default `llama-3.1-8b-instant`
 - `GROQ_TEMPERATURE`, default `0.7`
@@ -64,6 +65,8 @@ Provider tuning:
 - `CARTESIA_SPEED`, default `1.2` (`0.6` to `1.5`; higher is faster)
 - `CARTESIA_SAMPLE_RATE`, default `16000`
 - `CARTESIA_VERSION`, default `2026-03-01`
+- `CARTESIA_OPEN_TIMEOUT_SECONDS`, default `8`; WebSocket opening-handshake timeout per attempt
+- `CARTESIA_CONNECT_RETRIES`, default `1`; retry count for transient Cartesia opening-handshake timeouts
 - `VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED`, default `true`
 - `VOICE_AGENT_CARTESIA_SSML_ENABLED`, default `true`
 - `VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED`, default `false`
@@ -151,10 +154,17 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
       "llm": "groq",
       "tts": "cartesia"
     },
+    "audio": {
+      "input_gain": 2.0
+    },
     "conversation": {
       "intent_inference_enabled": true
     },
     "cartesia": {
+      "connection": {
+        "open_timeout_seconds": 8.0,
+        "connect_retries": 1
+      },
       "speech_direction": {
         "enabled": true,
         "ssml_enabled": true,

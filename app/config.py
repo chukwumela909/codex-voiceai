@@ -20,6 +20,7 @@ MIN_DEEPGRAM_UTTERANCE_END_MS = 1000
 DEFAULT_DEEPGRAM_UTTERANCE_END_MS = MIN_DEEPGRAM_UTTERANCE_END_MS
 DEFAULT_PARTIAL_IDLE_FINALIZE_MS = 1000
 DEFAULT_AMBIENCE_VOLUME = 0.035
+DEFAULT_INPUT_GAIN = 2.0
 
 
 def normalize_leading_uuid(value: object) -> str | None:
@@ -71,6 +72,7 @@ class Settings(BaseSettings):
         default=DEFAULT_PARTIAL_IDLE_FINALIZE_MS,
         alias="VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS",
     )
+    input_gain: float = Field(default=DEFAULT_INPUT_GAIN, alias="VOICE_AGENT_INPUT_GAIN")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.7, alias="GROQ_TEMPERATURE")
     cartesia_model: str = Field(default="sonic-3", alias="CARTESIA_MODEL")
@@ -78,6 +80,8 @@ class Settings(BaseSettings):
     cartesia_voice_id: str | None = Field(default=None, alias="CARTESIA_VOICE_ID")
     cartesia_sample_rate: int = Field(default=16000, alias="CARTESIA_SAMPLE_RATE")
     cartesia_version: str = Field(default="2026-03-01", alias="CARTESIA_VERSION")
+    cartesia_open_timeout_seconds: float = Field(default=8.0, gt=0, alias="CARTESIA_OPEN_TIMEOUT_SECONDS")
+    cartesia_connect_retries: int = Field(default=1, ge=0, alias="CARTESIA_CONNECT_RETRIES")
     persona: str = Field(
         default=(
             "You are a concise, warm voice on an ambiguous open phone call. "
@@ -132,6 +136,13 @@ class Settings(BaseSettings):
         if value < 1:
             raise ValueError("VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS must be at least 1")
         return value
+
+    @field_validator("input_gain")
+    @classmethod
+    def validate_input_gain(cls, value: float) -> float:
+        if not 0.1 <= value <= 8.0:
+            raise ValueError("VOICE_AGENT_INPUT_GAIN must be between 0.1 and 8.0")
+        return round(value, 2)
 
     @field_validator("deepgram_utterance_end_ms")
     @classmethod
@@ -248,10 +259,17 @@ class Settings(BaseSettings):
                 "llm": "groq",
                 "tts": "cartesia",
             },
+            "audio": {
+                "input_gain": self.input_gain,
+            },
             "conversation": {
                 "intent_inference_enabled": self.intent_inference_enabled,
             },
             "cartesia": {
+                "connection": {
+                    "open_timeout_seconds": self.cartesia_open_timeout_seconds,
+                    "connect_retries": self.cartesia_connect_retries,
+                },
                 "speech_direction": {
                     "enabled": self.cartesia_speech_director_enabled,
                     "ssml_enabled": self.cartesia_ssml_enabled,

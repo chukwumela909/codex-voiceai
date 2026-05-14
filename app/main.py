@@ -63,6 +63,7 @@ def log_server_event(payload: dict) -> None:
         "proactive.cooldown",
         "proactive.state",
         "session.ended",
+        "audio.input",
     }:
         return
 
@@ -70,7 +71,8 @@ def log_server_event(payload: dict) -> None:
         (
             "event=%s state=%s stage=%s provider=%s response_id=%s latency_ms=%s reason=%s "
             "trigger=%s skip_reason=%s cooldown_ms=%s next_eligible_at_ms=%s proactive_failures=%s "
-            "failure_backoff_threshold=%s consecutive_prompts=%s message=%s"
+            "failure_backoff_threshold=%s consecutive_prompts=%s rms=%s peak=%s raw_rms=%s raw_peak=%s "
+            "input_gain=%s message=%s"
         ),
         event_type,
         event_payload.get("state", "-"),
@@ -86,6 +88,11 @@ def log_server_event(payload: dict) -> None:
         event_payload.get("proactive_failures", "-"),
         event_payload.get("failure_backoff_threshold", "-"),
         event_payload.get("consecutive_prompts", "-"),
+        event_payload.get("rms", "-"),
+        event_payload.get("peak", "-"),
+        event_payload.get("raw_rms", "-"),
+        event_payload.get("raw_peak", "-"),
+        event_payload.get("input_gain", "-"),
         event_payload.get("message", "-"),
         extra={"session_id": payload.get("session_id", "-")},
     )

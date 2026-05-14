@@ -114,7 +114,10 @@ class MockConversationSession:
         if frame:
             self.received_audio_frame = True
         self.bytes_received += len(frame)
-        level = calculate_pcm_level(frame)
+        input_gain = float(getattr(self.settings, "input_gain", 1.0))
+        raw_level = calculate_pcm_level(frame)
+        processed_frame = apply_pcm_gain(frame, input_gain)
+        level = calculate_pcm_level(processed_frame)
         mock_speech_detected = self.transcriber is None and is_mock_speech_frame(level)
         if self.frames_received == 1 or self.frames_received % 100 == 0:
             await self.send_event(
@@ -127,6 +130,9 @@ class MockConversationSession:
                         "frame_bytes": len(frame),
                         "rms": level["rms"],
                         "peak": level["peak"],
+                        "raw_rms": raw_level["rms"],
+                        "raw_peak": raw_level["peak"],
+                        "input_gain": input_gain,
                         "mock_speech_bytes_received": self.mock_speech_bytes_received,
                         "speech_detected": mock_speech_detected,
                         "sample_rate": self.audio_config["sample_rate"] if self.audio_config else None,
@@ -139,13 +145,13 @@ class MockConversationSession:
             await self._maybe_schedule_startup_greeting()
 
         if self.transcriber:
-            await self.transcriber.send_audio(frame)
+            await self.transcriber.send_audio(processed_frame)
             return
 
         if not mock_speech_detected:
             return
 
-        self.mock_speech_bytes_received += len(frame)
+        self.mock_speech_bytes_received += len(processed_frame)
         if self.turn_started_at is None:
             self.turn_started_at = time.perf_counter()
 
@@ -248,6 +254,10 @@ class MockConversationSession:
         )
 
     async def handle_live_transcript(self, transcript: dict) -> None:
+        if transcript.get("type") == "speech_started":
+            await self._handle_speech_started(transcript)
+            return
+
         if transcript.get("type") == "utterance_end":
             await self._handle_utterance_end(transcript)
             return
@@ -297,6 +307,23 @@ class MockConversationSession:
             self.pending_transcript_task.cancel()
         self.pending_transcript_task = asyncio.create_task(
             self._finalize_partial_transcript_after_idle(transcript["text"], self.live_transcript_sequence)
+        )
+
+    async def _handle_speech_started(self, transcript: dict) -> None:
+        await self._mark_user_speech_started("live_speech_started")
+        if self.turn_started_at is None:
+            self.turn_started_at = time.perf_counter()
+        await self.send_event(event("status.changed", self.session_id, {"state": "hearing"}))
+        await self.send_event(
+            event(
+                "pipeline.stage",
+                self.session_id,
+                {
+                    "stage": "stt_speech_started",
+                    "provider": "deepgram",
+                    "timestamp": transcript.get("timestamp"),
+                },
+            )
         )
 
     async def handle_live_error(self, message: str) -> None:
@@ -556,7 +583,12 @@ class MockConversationSession:
         self.latest_partial_text = None
         return text
 
-    async def _interrupt_active_response(self, next_user_text: str) -> None:
+    async def _interrupt_active_response(
+        self,
+        next_user_text: str,
+        *,
+        reason: str = "user_speech_during_response",
+    ) -> None:
         interrupted_response_id = self.active_response_id
         metadata = dict(self.active_response_metadata)
         await self.send_event(
@@ -566,7 +598,7 @@ class MockConversationSession:
                 {
                     "interrupted_response_id": interrupted_response_id,
                     "next_user_text": next_user_text,
-                    "reason": "user_speech_during_response",
+                    "reason": reason,
                     **metadata,
                 },
             )
@@ -957,6 +989,8 @@ class MockConversationSession:
             sample_rate=self.settings.cartesia_sample_rate,
             cartesia_version=self.settings.cartesia_version,
             speed=getattr(self.settings, "cartesia_speed", None),
+            open_timeout_seconds=getattr(self.settings, "cartesia_open_timeout_seconds", 8.0),
+            connect_retries=getattr(self.settings, "cartesia_connect_retries", 1),
         )
 
     async def _direct_cartesia_text(self, text: str, *, metadata: dict | None = None) -> str:
@@ -1589,6 +1623,21 @@ def calculate_pcm_level(frame: bytes) -> dict[str, float]:
     mean_square = sum(sample * sample for sample in samples) / sample_count
     rms = math.sqrt(mean_square) / 32768
     return {"rms": round(rms, 4), "peak": round(peak, 4)}
+
+
+def apply_pcm_gain(frame: bytes, gain: float) -> bytes:
+    if len(frame) < 2 or gain == 1.0:
+        return frame
+
+    sample_count = len(frame) // 2
+    samples = struct.unpack(f"<{sample_count}h", frame[: sample_count * 2])
+    boosted = bytearray()
+    for sample in samples:
+        boosted_sample = round(sample * gain)
+        boosted_sample = max(-32768, min(32767, boosted_sample))
+        boosted.extend(struct.pack("<h", boosted_sample))
+    boosted.extend(frame[sample_count * 2 :])
+    return bytes(boosted)
 
 
 def is_mock_speech_frame(level: dict[str, float]) -> bool:

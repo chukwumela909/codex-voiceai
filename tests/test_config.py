@@ -110,6 +110,7 @@ def test_balanced_fast_voice_timing_defaults(monkeypatch):
     monkeypatch.delenv("DEEPGRAM_ENDPOINTING_MS", raising=False)
     monkeypatch.delenv("DEEPGRAM_UTTERANCE_END_MS", raising=False)
     monkeypatch.delenv("VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_INPUT_GAIN", raising=False)
 
     settings = Settings(_env_file=None)
     status = settings.public_config_status()
@@ -117,11 +118,24 @@ def test_balanced_fast_voice_timing_defaults(monkeypatch):
     assert settings.deepgram_endpointing_ms == 220
     assert settings.deepgram_utterance_end_ms == 1000
     assert settings.partial_idle_finalize_ms == 1000
+    assert settings.input_gain == 2.0
     assert status["turn_timing"] == {
         "deepgram_endpointing_ms": 220,
         "deepgram_utterance_end_ms": 1000,
         "partial_idle_finalize_ms": 1000,
     }
+    assert status["audio"] == {
+        "input_gain": 2.0,
+    }
+
+
+def test_input_gain_can_be_tuned_for_quiet_microphones(monkeypatch):
+    monkeypatch.setenv("VOICE_AGENT_INPUT_GAIN", "3.25")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.input_gain == 3.25
+    assert settings.public_config_status()["audio"]["input_gain"] == 3.25
 
 
 def test_contextual_speech_public_config_defaults_and_overrides(monkeypatch):
@@ -190,6 +204,27 @@ def test_cartesia_speed_defaults_to_faster_spoken_agent_and_can_be_overridden(mo
 
     assert default_settings.cartesia_speed == 1.2
     assert overridden_settings.cartesia_speed == 1.35
+
+
+def test_cartesia_websocket_retry_defaults_and_overrides(monkeypatch):
+    monkeypatch.delenv("CARTESIA_OPEN_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("CARTESIA_CONNECT_RETRIES", raising=False)
+
+    default_settings = Settings(_env_file=None)
+    default_status = default_settings.public_config_status()
+
+    monkeypatch.setenv("CARTESIA_OPEN_TIMEOUT_SECONDS", "4.5")
+    monkeypatch.setenv("CARTESIA_CONNECT_RETRIES", "2")
+    overridden_settings = Settings(_env_file=None)
+
+    assert default_settings.cartesia_open_timeout_seconds == 8.0
+    assert default_settings.cartesia_connect_retries == 1
+    assert default_status["cartesia"]["connection"] == {
+        "open_timeout_seconds": 8.0,
+        "connect_retries": 1,
+    }
+    assert overridden_settings.cartesia_open_timeout_seconds == 4.5
+    assert overridden_settings.cartesia_connect_retries == 2
 
 
 def test_proactive_auto_enabled_in_mock_and_live_opt_in(monkeypatch):

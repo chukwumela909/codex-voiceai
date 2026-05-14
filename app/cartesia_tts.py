@@ -1,9 +1,14 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import websockets
+
+
+class CartesiaConnectionError(RuntimeError):
+    pass
 
 
 class CartesiaStreamingTTS:
@@ -16,6 +21,9 @@ class CartesiaStreamingTTS:
         sample_rate: int,
         cartesia_version: str,
         speed: float | None = None,
+        open_timeout_seconds: float = 8.0,
+        connect_retries: int = 1,
+        retry_backoff_seconds: float = 0.2,
     ) -> None:
         self.api_key = api_key
         self.model_id = model_id
@@ -23,16 +31,13 @@ class CartesiaStreamingTTS:
         self.sample_rate = sample_rate
         self.cartesia_version = cartesia_version
         self.speed = speed
+        self.open_timeout_seconds = open_timeout_seconds
+        self.connect_retries = max(0, connect_retries)
+        self.retry_backoff_seconds = max(0.0, retry_backoff_seconds)
 
     async def stream_speech(self, transcript: str, *, context_id: str | None = None) -> AsyncIterator[dict]:
         context_id = context_id or f"ctx_{uuid4().hex}"
-        async with websockets.connect(
-            "wss://api.cartesia.ai/tts/websocket",
-            additional_headers={
-                "X-API-Key": self.api_key,
-                "Cartesia-Version": self.cartesia_version,
-            },
-        ) as websocket:
+        async with self._connect_websocket() as websocket:
             await websocket.send(json.dumps(self._generation_request(transcript, context_id)))
             async for raw_message in websocket:
                 parsed = parse_cartesia_message(raw_message)
@@ -51,13 +56,7 @@ class CartesiaStreamingTTS:
         context_id = context_id or f"ctx_{uuid4().hex}"
         done_sentinel = object()
 
-        async with websockets.connect(
-            "wss://api.cartesia.ai/tts/websocket",
-            additional_headers={
-                "X-API-Key": self.api_key,
-                "Cartesia-Version": self.cartesia_version,
-            },
-        ) as websocket:
+        async with self._connect_websocket() as websocket:
             queue: asyncio.Queue[dict | object] = asyncio.Queue()
 
             async def read_messages() -> None:
@@ -146,6 +145,40 @@ class CartesiaStreamingTTS:
         if self.speed is not None:
             request["generation_config"] = {"speed": self.speed}
         return request
+
+    @asynccontextmanager
+    async def _connect_websocket(self) -> AsyncIterator[object]:
+        attempts = self.connect_retries + 1
+        for attempt in range(1, attempts + 1):
+            manager = websockets.connect(
+                "wss://api.cartesia.ai/tts/websocket",
+                additional_headers={
+                    "X-API-Key": self.api_key,
+                    "Cartesia-Version": self.cartesia_version,
+                },
+                open_timeout=self.open_timeout_seconds,
+            )
+            try:
+                websocket = await manager.__aenter__()
+            except TimeoutError as exc:
+                if attempt >= attempts:
+                    raise CartesiaConnectionError(
+                        "Cartesia WebSocket opening handshake timed out "
+                        f"after {attempts} attempts ({self.open_timeout_seconds:g}s each)."
+                    ) from exc
+                if self.retry_backoff_seconds:
+                    await asyncio.sleep(self.retry_backoff_seconds)
+                continue
+
+            try:
+                yield websocket
+            except BaseException as exc:
+                suppress = await manager.__aexit__(type(exc), exc, exc.__traceback__)
+                if not suppress:
+                    raise
+            else:
+                await manager.__aexit__(None, None, None)
+            return
 
 
 def parse_cartesia_message(raw_message: str | bytes) -> dict | None:
