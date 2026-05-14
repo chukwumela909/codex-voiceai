@@ -13,3 +13,4 @@ venv/
 dist/
 build/
 node_modules/
+.worktrees/
