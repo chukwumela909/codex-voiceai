@@ -69,6 +69,70 @@ def test_speech_final_transcript_starts_agent_response_without_cartesia_precheck
     )
 
 
+def test_live_agent_receives_hidden_intent_inference_context_but_events_keep_raw_transcript():
+    events = []
+    captured_transcripts = []
+    sessions = []
+
+    class FakeAgent:
+        async def stream_response(self, transcript):
+            captured_transcripts.append(transcript)
+            yield "I understood the intent from context."
+
+    settings = proactive_settings(
+        normalized_mode="live",
+        groq_api_key="groq-key",
+        cartesia_api_key=None,
+        cartesia_voice_id=None,
+        intent_inference_enabled=True,
+    )
+
+    async def send_event(event):
+        events.append(event)
+
+    async def run_session():
+        session = MockConversationSession("sess_test", send_event, settings)
+        sessions.append(session)
+        session.agent = FakeAgent()
+        session.transcript = [
+            {"role": "user", "content": "I am testing whether the mic hears me."},
+            {"role": "assistant", "content": "Say one more phrase and I will listen."},
+        ]
+        await session.handle_live_transcript(
+            {
+                "text": "You're what's up can you hear me now",
+                "confidence": 0.61,
+                "is_final": True,
+                "speech_final": True,
+                "provider": "deepgram",
+            }
+        )
+        assert session.current_task is not None
+        await session.current_task
+
+    asyncio.run(run_session())
+
+    raw_final = next(event for event in events if event["type"] == "transcript.final")
+    assert raw_final["payload"]["text"] == "You're what's up can you hear me now"
+    assert captured_transcripts
+    assert captured_transcripts[0][-2]["role"] == "system"
+    assert "Infer the user's likely intent" in captured_transcripts[0][-2]["content"]
+    assert captured_transcripts[0][-1] == {
+        "role": "user",
+        "content": "You're what's up can you hear me now",
+    }
+    assert any(
+        event["type"] == "pipeline.stage"
+        and event["payload"].get("stage") == "llm_context"
+        and event["payload"].get("intent_inference") is True
+        for event in events
+    )
+    assert sessions[0].transcript[-2:] == [
+        {"role": "user", "content": "You're what's up can you hear me now"},
+        {"role": "assistant", "content": "I understood the intent from context."},
+    ]
+
+
 def proactive_settings(**overrides):
     settings = {
         "normalized_mode": "mock",

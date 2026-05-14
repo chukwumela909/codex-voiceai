@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.cartesia_tts import CartesiaStreamingTTS, generate_cartesia_context_id
 from app.config import is_uuid
+from app.conversation_context import agent_transcript_with_intent_inference
 from app.deepgram import DeepgramStreamingTranscriber
 from app.events import event
 from app.exceptions import ClientConnectionClosed
@@ -1234,6 +1235,26 @@ class MockConversationSession:
             temperature=self.settings.groq_temperature,
         )
 
+    async def _live_user_agent_transcript(self, *, metadata: dict | None = None) -> list[dict[str, str]]:
+        metadata = metadata or {}
+        enabled = bool(getattr(self.settings, "intent_inference_enabled", True))
+        transcript = agent_transcript_with_intent_inference(self.transcript, enabled=enabled)
+        if enabled and transcript != self.transcript:
+            await self.send_event(
+                event(
+                    "pipeline.stage",
+                    self.session_id,
+                    {
+                        "stage": "llm_context",
+                        "provider": "groq",
+                        "intent_inference": True,
+                        "turns_sent": len(transcript),
+                        **metadata,
+                    },
+                )
+            )
+        return transcript
+
     def _uses_default_live_agent_response(self) -> bool:
         return getattr(self._stream_live_agent_response, "__func__", None) is MockConversationSession._stream_live_agent_response
 
@@ -1246,6 +1267,7 @@ class MockConversationSession:
     ) -> str:
         metadata = metadata or {}
         self._ensure_agent()
+        agent_transcript = await self._live_user_agent_transcript(metadata=metadata)
         full_response = ""
         pending = ""
         emitted_text = ""
@@ -1253,7 +1275,7 @@ class MockConversationSession:
         async def speakable_chunks() -> AsyncIterator[str]:
             nonlocal emitted_text, full_response, pending
             try:
-                async for delta in self.agent.stream_response(self.transcript):
+                async for delta in self.agent.stream_response(agent_transcript):
                     full_response += delta
                     pending += delta
                     chunks, pending = pop_speakable_chunks(pending)
@@ -1314,12 +1336,13 @@ class MockConversationSession:
             return message
 
         self._ensure_agent()
+        agent_transcript = await self._live_user_agent_transcript()
 
         full_response = ""
         pending = ""
         try:
             emitted_text = ""
-            async for delta in self.agent.stream_response(self.transcript):
+            async for delta in self.agent.stream_response(agent_transcript):
                 full_response += delta
                 pending += delta
                 chunks, pending = pop_speakable_chunks(pending)
