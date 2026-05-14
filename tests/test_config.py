@@ -98,6 +98,14 @@ def test_websocket_keepalive_defaults_and_overrides(monkeypatch):
     assert settings.deepgram_utterance_end_ms == 1200
 
 
+def test_deepgram_utterance_end_ms_clamps_to_provider_minimum(monkeypatch):
+    monkeypatch.setenv("DEEPGRAM_UTTERANCE_END_MS", "700")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.deepgram_utterance_end_ms == 1000
+
+
 def test_balanced_fast_voice_timing_defaults(monkeypatch):
     monkeypatch.delenv("DEEPGRAM_ENDPOINTING_MS", raising=False)
     monkeypatch.delenv("DEEPGRAM_UTTERANCE_END_MS", raising=False)
@@ -107,12 +115,44 @@ def test_balanced_fast_voice_timing_defaults(monkeypatch):
     status = settings.public_config_status()
 
     assert settings.deepgram_endpointing_ms == 220
-    assert settings.deepgram_utterance_end_ms == 700
-    assert settings.partial_idle_finalize_ms == 650
+    assert settings.deepgram_utterance_end_ms == 1000
+    assert settings.partial_idle_finalize_ms == 1000
     assert status["turn_timing"] == {
         "deepgram_endpointing_ms": 220,
-        "deepgram_utterance_end_ms": 700,
-        "partial_idle_finalize_ms": 650,
+        "deepgram_utterance_end_ms": 1000,
+        "partial_idle_finalize_ms": 1000,
+    }
+
+
+def test_contextual_speech_public_config_defaults_and_overrides(monkeypatch):
+    monkeypatch.delenv("VOICE_AGENT_INTENT_INFERENCE_ENABLED", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_CARTESIA_SSML_ENABLED", raising=False)
+    monkeypatch.delenv("VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED", raising=False)
+
+    defaults = Settings(_env_file=None).public_config_status()
+
+    monkeypatch.setenv("VOICE_AGENT_INTENT_INFERENCE_ENABLED", "false")
+    monkeypatch.setenv("VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED", "false")
+    monkeypatch.setenv("VOICE_AGENT_CARTESIA_SSML_ENABLED", "false")
+    monkeypatch.setenv("VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED", "true")
+    overridden = Settings(_env_file=None).public_config_status()
+
+    assert defaults["conversation"] == {
+        "intent_inference_enabled": True,
+    }
+    assert defaults["cartesia"]["speech_direction"] == {
+        "enabled": True,
+        "ssml_enabled": True,
+        "emotion_tags_enabled": False,
+    }
+    assert overridden["conversation"] == {
+        "intent_inference_enabled": False,
+    }
+    assert overridden["cartesia"]["speech_direction"] == {
+        "enabled": False,
+        "ssml_enabled": False,
+        "emotion_tags_enabled": True,
     }
 
 

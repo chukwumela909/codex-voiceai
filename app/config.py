@@ -16,8 +16,9 @@ LIVE_PROACTIVE_REPEAT_COOLDOWN_MS = 60000
 MOCK_PROACTIVE_MAX_CONSECUTIVE_PROMPTS = 3
 LIVE_PROACTIVE_MAX_CONSECUTIVE_PROMPTS = 1
 DEFAULT_DEEPGRAM_ENDPOINTING_MS = 220
-DEFAULT_DEEPGRAM_UTTERANCE_END_MS = 700
-DEFAULT_PARTIAL_IDLE_FINALIZE_MS = 650
+MIN_DEEPGRAM_UTTERANCE_END_MS = 1000
+DEFAULT_DEEPGRAM_UTTERANCE_END_MS = MIN_DEEPGRAM_UTTERANCE_END_MS
+DEFAULT_PARTIAL_IDLE_FINALIZE_MS = 1000
 DEFAULT_AMBIENCE_VOLUME = 0.035
 
 
@@ -85,6 +86,16 @@ class Settings(BaseSettings):
         ),
         alias="VOICE_AGENT_PERSONA",
     )
+    intent_inference_enabled: bool = Field(default=True, alias="VOICE_AGENT_INTENT_INFERENCE_ENABLED")
+    cartesia_speech_director_enabled: bool = Field(
+        default=True,
+        alias="VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED",
+    )
+    cartesia_ssml_enabled: bool = Field(default=True, alias="VOICE_AGENT_CARTESIA_SSML_ENABLED")
+    cartesia_emotion_tags_enabled: bool = Field(
+        default=False,
+        alias="VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED",
+    )
     ambience_enabled: bool = Field(default=True, alias="VOICE_AGENT_AMBIENCE_ENABLED")
     ambience_scene: str = Field(default="room_line", alias="VOICE_AGENT_AMBIENCE_SCENE")
     ambience_volume: float = Field(default=DEFAULT_AMBIENCE_VOLUME, alias="VOICE_AGENT_AMBIENCE_VOLUME")
@@ -121,6 +132,11 @@ class Settings(BaseSettings):
         if value < 1:
             raise ValueError("VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS must be at least 1")
         return value
+
+    @field_validator("deepgram_utterance_end_ms")
+    @classmethod
+    def normalize_deepgram_utterance_end_ms(cls, value: int) -> int:
+        return max(value, MIN_DEEPGRAM_UTTERANCE_END_MS)
 
     @field_validator("ambience_scene")
     @classmethod
@@ -231,6 +247,16 @@ class Settings(BaseSettings):
                 "stt": "deepgram",
                 "llm": "groq",
                 "tts": "cartesia",
+            },
+            "conversation": {
+                "intent_inference_enabled": self.intent_inference_enabled,
+            },
+            "cartesia": {
+                "speech_direction": {
+                    "enabled": self.cartesia_speech_director_enabled,
+                    "ssml_enabled": self.cartesia_ssml_enabled,
+                    "emotion_tags_enabled": self.cartesia_emotion_tags_enabled,
+                },
             },
             "ambience": {
                 "enabled": self.ambience_enabled,
