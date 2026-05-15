@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Pipecat Spike — Voice Agent</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      button { font-size: 1rem; padding: 0.5rem 1rem; margin-right: 0.5rem; }
+      #status { margin-top: 1rem; font-family: ui-monospace, monospace; white-space: pre-wrap; }
+      .row { margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Pipecat Spike</h1>
+    <p>WebRTC client for the Pipecat-based pipeline at <code>/api/offer</code>.</p>
+    <div class="row">
+      <button id="connect">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+    </div>
+    <audio id="remote-audio" autoplay></audio>
+    <pre id="status">idle</pre>
+
+    <script type="module">
+      const statusEl = document.getElementById("status");
+      const connectBtn = document.getElementById("connect");
+      const disconnectBtn = document.getElementById("disconnect");
+      const remoteAudio = document.getElementById("remote-audio");
+
+      let pc = null;
+      let localStream = null;
+      let pcId = null;
+
+      function log(...args) {
+        const line = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+        statusEl.textContent += "\n" + line;
+        console.log(...args);
+      }
+
+      async function connect() {
+        connectBtn.disabled = true;
+        statusEl.textContent = "connecting...";
+
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+        });
+
+        pc.addEventListener("track", (e) => {
+          log("ontrack", e.track.kind);
+          if (e.track.kind === "audio") remoteAudio.srcObject = e.streams[0];
+        });
+        pc.addEventListener("connectionstatechange", () => log("pc state:", pc.connectionState));
+        pc.addEventListener("iceconnectionstatechange", () => log("ice state:", pc.iceConnectionState));
+
+        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+        pc.addTransceiver("audio", { direction: "recvonly" });
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        await waitForIceGathering(pc);
+
+        const resp = await fetch("/api/offer", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sdp: pc.localDescription.sdp,
+            type: pc.localDescription.type,
+            pc_id: pcId,
+          }),
+        });
+
+        if (!resp.ok) {
+          log("offer failed", resp.status, await resp.text());
+          await teardown();
+          return;
+        }
+
+        const answer = await resp.json();
+        pcId = answer.pc_id ?? pcId;
+        await pc.setRemoteDescription(answer);
+        log("connected, pc_id=", pcId);
+        disconnectBtn.disabled = false;
+      }
+
+      function waitForIceGathering(pc) {
+        if (pc.iceGatheringState === "complete") return Promise.resolve();
+        return new Promise((resolve) => {
+          const check = () => {
+            if (pc.iceGatheringState === "complete") {
+              pc.removeEventListener("icegatheringstatechange", check);
+              resolve();
+            }
+          };
+          pc.addEventListener("icegatheringstatechange", check);
+        });
+      }
+
+      async function teardown() {
+        if (pc) {
+          pc.getSenders().forEach((s) => s.track && s.track.stop());
+          pc.close();
+          pc = null;
+        }
+        if (localStream) {
+          localStream.getTracks().forEach((t) => t.stop());
+          localStream = null;
+        }
+        remoteAudio.srcObject = null;
+        pcId = null;
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+        log("disconnected");
+      }
+
+      connectBtn.addEventListener("click", () => connect().catch((e) => log("error:", e.message)));
+      disconnectBtn.addEventListener("click", () => teardown());
+    </script>
+  </body>
+</html>
