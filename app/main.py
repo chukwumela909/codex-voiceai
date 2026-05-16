@@ -136,7 +136,7 @@ async def webrtc_offer(offer: WebRTCOffer, background_tasks: BackgroundTasks) ->
     Lazy-imports pipecat so the legacy /ws/browser path keeps working even if
     pipecat-ai is not yet installed.
     """
-    from pipecat.transports.network.small_webrtc import SmallWebRTCConnection
+    from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
     from app.pipeline import run_pipecat_session
 

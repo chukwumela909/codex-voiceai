@@ -5,3 +5,7 @@ INFO:     127.0.0.1:56660 - "GET /static/app.js?v=phase6.2 HTTP/1.1" 200 OK
 INFO:     127.0.0.1:57420 - "GET /favicon.ico HTTP/1.1" 404 Not Found
 INFO:     127.0.0.1:50891 - "GET /favicon.ico HTTP/1.1" 404 Not Found
 INFO:     127.0.0.1:63757 - "GET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59147 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59147 - "GET /static/styles.css?v=phase6.2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50548 - "GET /static/app.js?v=phase6.2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58325 - "GET /favicon.ico HTTP/1.1" 404 Not Found

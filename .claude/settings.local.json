@@ -7,7 +7,22 @@
       "Bash(echo \"EXIT:$?\")",
       "Bash(git --version)",
       "Bash(git ls-remote *)",
-      "Bash(git clone *)"
+      "Bash(git clone *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(Get-CimInstance *)",
+      "Bash(.venv/Scripts/python.exe *)",
+      "PowerShell(pip install *)",
+      "PowerShell(pip *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(.\\\\.venv\\\\Scripts\\\\Activate.ps1)",
+      "Bash(uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(Tee-Object -FilePath uvicorn-pipecat.log)",
+      "Bash(Start-Sleep -Seconds 5)",
+      "Bash(Get-Content uvicorn-pipecat.log -Tail 20)",
+      "PowerShell(Get-NetTCPConnection *)"
     ]
   }
 }
