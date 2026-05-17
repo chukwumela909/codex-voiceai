@@ -37,7 +37,7 @@
       const wsUrl = `${wsScheme}://${location.host}/api/ws`;
 
       const client = new PipecatClient({
-        transport: new WebSocketTransport({ serverUrl: wsUrl }),
+        transport: new WebSocketTransport(),
         enableMic: true,
         enableCam: false,
         callbacks: {
@@ -63,7 +63,7 @@
         connectBtn.disabled = true;
         statusEl.textContent = "connecting...";
         try {
-          await client.connect();
+          await client.connect({ ws_url: wsUrl });
           disconnectBtn.disabled = false;
         } catch (e) {
           log("connect failed:", e?.message ?? e);

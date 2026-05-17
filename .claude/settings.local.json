@@ -22,7 +22,9 @@
       "Bash(Tee-Object -FilePath uvicorn-pipecat.log)",
       "Bash(Start-Sleep -Seconds 5)",
       "Bash(Get-Content uvicorn-pipecat.log -Tail 20)",
-      "PowerShell(Get-NetTCPConnection *)"
+      "PowerShell(Get-NetTCPConnection *)",
+      "Bash(curl -s https://unpkg.com/@pipecat-ai/websocket-transport@latest/dist/websocketTransport.d.ts)",
+      "Bash(curl *)"
     ]
   }
 }
