@@ -1,7 +1,7 @@
 """Pipecat 1.x voice pipeline (spike).
 
 Runs side-by-side with the legacy `app.mock_conversation` pipeline. Wires
-SmallWebRTC transport → Deepgram STT → Groq LLM (via OpenAI-compatible
+FastAPI WebSocket transport → Deepgram STT → Groq LLM (via OpenAI-compatible
 endpoint) → Cartesia TTS, with Silero VAD for barge-in and a single
 UserIdleController for the silence-nudge behavior.
 """
@@ -21,11 +21,14 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMUserAggregator,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
+from pipecat.transports.websocket.fastapi import (
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
+)
 from pipecat.turns.user_idle_controller import UserIdleController
 
 from app.config import Settings
@@ -65,15 +68,17 @@ GREETING_INSTRUCTION = (
 )
 
 
-async def run_pipecat_session(webrtc_connection, settings: Settings) -> None:
-    """Build and run a Pipecat pipeline against an established WebRTC connection."""
+async def run_pipecat_session(websocket, settings: Settings) -> None:
+    """Build and run a Pipecat pipeline against an accepted FastAPI WebSocket."""
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket,
+        params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
+            serializer=ProtobufFrameSerializer(),
         ),
     )
 

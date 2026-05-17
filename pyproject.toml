@@ -9,8 +9,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "pydantic-settings>=2.4.0",
     "websockets>=13.0",
-    "pipecat-ai[deepgram,groq,cartesia,silero,webrtc]>=1.2,<2",
-    "aiortc>=1.14",
+    "pipecat-ai[deepgram,groq,cartesia,silero]>=1.2,<2",
 ]
 
 [project.optional-dependencies]

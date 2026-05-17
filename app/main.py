@@ -2,11 +2,10 @@ import asyncio
 import json
 import logging
 
-from fastapi import BackgroundTasks, FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 from app.config import get_settings
 from app.events import CLIENT_EVENT_TYPES, PLANNED_EVENT_TYPES, SERVER_EVENT_TYPES, event, new_session_id
@@ -119,48 +118,26 @@ async def pipecat_spike_page() -> FileResponse:
     return FileResponse("frontend/pipecat.html")
 
 
-class WebRTCOffer(BaseModel):
-    sdp: str
-    type: str
-    pc_id: str | None = None
-    restart_pc: bool = False
-
-
-_pipecat_connections: dict[str, object] = {}
-
-
-@app.post("/api/offer")
-async def webrtc_offer(offer: WebRTCOffer, background_tasks: BackgroundTasks) -> dict:
-    """WebRTC signaling for the Pipecat spike pipeline.
+@app.websocket("/api/ws")
+async def pipecat_ws(websocket: WebSocket) -> None:
+    """WebSocket transport for the Pipecat spike pipeline.
 
     Lazy-imports pipecat so the legacy /ws/browser path keeps working even if
     pipecat-ai is not yet installed.
     """
-    from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+    await websocket.accept()
+    session_id = new_session_id()
+    log_info("pipecat ws client connected", session_id=session_id)
 
     from app.pipeline import run_pipecat_session
 
-    if offer.pc_id and offer.pc_id in _pipecat_connections:
-        connection = _pipecat_connections[offer.pc_id]
-        if offer.restart_pc:
-            await connection.renegotiate(sdp=offer.sdp, type=offer.type, restart_pc=True)
-        else:
-            await connection.renegotiate(sdp=offer.sdp, type=offer.type)
-    else:
-        connection = SmallWebRTCConnection(ice_servers=["stun:stun.l.google.com:19302"])
-        await connection.initialize(sdp=offer.sdp, type=offer.type)
-
-        @connection.event_handler("closed")
-        async def _on_closed(c) -> None:
-            _pipecat_connections.pop(c.pc_id, None)
-            log_info("pipecat webrtc connection closed", session_id=c.pc_id)
-
-        log_info("pipecat webrtc connection initialized", session_id=connection.pc_id)
-        background_tasks.add_task(run_pipecat_session, connection, settings)
-
-    answer = connection.get_answer()
-    _pipecat_connections[answer["pc_id"]] = connection
-    return answer
+    try:
+        await run_pipecat_session(websocket, settings)
+    except WebSocketDisconnect:
+        log_info("pipecat ws client disconnected", session_id=session_id)
+    except Exception:
+        logger.exception("pipecat session failed", extra={"session_id": session_id})
+        raise
 
 
 @app.get("/health")

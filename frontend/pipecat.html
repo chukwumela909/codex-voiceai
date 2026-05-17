@@ -12,23 +12,20 @@
   </head>
   <body>
     <h1>Pipecat Spike</h1>
-    <p>WebRTC client for the Pipecat-based pipeline at <code>/api/offer</code>.</p>
+    <p>WebSocket client for the Pipecat-based pipeline at <code>/api/ws</code>.</p>
     <div class="row">
       <button id="connect">Connect</button>
       <button id="disconnect" disabled>Disconnect</button>
     </div>
-    <audio id="remote-audio" autoplay></audio>
     <pre id="status">idle</pre>
 
     <script type="module">
+      import { PipecatClient } from "https://esm.sh/@pipecat-ai/client-js@1?bundle";
+      import { WebSocketTransport } from "https://esm.sh/@pipecat-ai/websocket-transport@1?bundle";
+
       const statusEl = document.getElementById("status");
       const connectBtn = document.getElementById("connect");
       const disconnectBtn = document.getElementById("disconnect");
-      const remoteAudio = document.getElementById("remote-audio");
-
-      let pc = null;
-      let localStream = null;
-      let pcId = null;
 
       function log(...args) {
         const line = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
@@ -36,85 +33,48 @@
         console.log(...args);
       }
 
-      async function connect() {
+      const wsScheme = location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${wsScheme}://${location.host}/api/ws`;
+
+      const client = new PipecatClient({
+        transport: new WebSocketTransport({ serverUrl: wsUrl }),
+        enableMic: true,
+        enableCam: false,
+        callbacks: {
+          onConnected:            () => log("connected"),
+          onDisconnected:         () => {
+            log("disconnected");
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+          },
+          onBotConnected:         () => log("bot connected"),
+          onBotReady:             () => log("bot ready"),
+          onUserStartedSpeaking:  () => log("user speaking"),
+          onUserStoppedSpeaking:  () => log("user stopped"),
+          onBotStartedSpeaking:   () => log("bot speaking"),
+          onBotStoppedSpeaking:   () => log("bot stopped"),
+          onUserTranscript:       (d) => d.final && log("you:", d.text),
+          onBotTranscript:        (d) => log("bot:", d.text),
+          onError:                (e) => log("error:", e?.message ?? e),
+        },
+      });
+
+      connectBtn.addEventListener("click", async () => {
         connectBtn.disabled = true;
         statusEl.textContent = "connecting...";
-
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-        });
-
-        pc.addEventListener("track", (e) => {
-          log("ontrack", e.track.kind);
-          if (e.track.kind === "audio") remoteAudio.srcObject = e.streams[0];
-        });
-        pc.addEventListener("connectionstatechange", () => log("pc state:", pc.connectionState));
-        pc.addEventListener("iceconnectionstatechange", () => log("ice state:", pc.iceConnectionState));
-
-        for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
-        pc.addTransceiver("audio", { direction: "recvonly" });
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        await waitForIceGathering(pc);
-
-        const resp = await fetch("/api/offer", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            sdp: pc.localDescription.sdp,
-            type: pc.localDescription.type,
-            pc_id: pcId,
-          }),
-        });
-
-        if (!resp.ok) {
-          log("offer failed", resp.status, await resp.text());
-          await teardown();
-          return;
+        try {
+          await client.connect();
+          disconnectBtn.disabled = false;
+        } catch (e) {
+          log("connect failed:", e?.message ?? e);
+          connectBtn.disabled = false;
         }
+      });
 
-        const answer = await resp.json();
-        pcId = answer.pc_id ?? pcId;
-        await pc.setRemoteDescription(answer);
-        log("connected, pc_id=", pcId);
-        disconnectBtn.disabled = false;
-      }
-
-      function waitForIceGathering(pc) {
-        if (pc.iceGatheringState === "complete") return Promise.resolve();
-        return new Promise((resolve) => {
-          const check = () => {
-            if (pc.iceGatheringState === "complete") {
-              pc.removeEventListener("icegatheringstatechange", check);
-              resolve();
-            }
-          };
-          pc.addEventListener("icegatheringstatechange", check);
-        });
-      }
-
-      async function teardown() {
-        if (pc) {
-          pc.getSenders().forEach((s) => s.track && s.track.stop());
-          pc.close();
-          pc = null;
-        }
-        if (localStream) {
-          localStream.getTracks().forEach((t) => t.stop());
-          localStream = null;
-        }
-        remoteAudio.srcObject = null;
-        pcId = null;
-        connectBtn.disabled = false;
+      disconnectBtn.addEventListener("click", async () => {
         disconnectBtn.disabled = true;
-        log("disconnected");
-      }
-
-      connectBtn.addEventListener("click", () => connect().catch((e) => log("error:", e.message)));
-      disconnectBtn.addEventListener("click", () => teardown());
+        try { await client.disconnect(); } catch (e) { log("disconnect error:", e?.message ?? e); }
+      });
     </script>
   </body>
 </html>
