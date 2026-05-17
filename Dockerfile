@@ -6,7 +6,9 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && pip uninstall -y opencv-python \
+    && pip install --no-cache-dir "opencv-python-headless<5,>=4.11.0.86"
 
 COPY app ./app
 COPY frontend ./frontend
