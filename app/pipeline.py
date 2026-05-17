@@ -46,6 +46,10 @@ class UserIdleObserver(FrameProcessor):
         super().__init__(**kwargs)
         self._controller = controller
 
+    async def setup(self, setup) -> None:
+        await super().setup(setup)
+        await self._controller.setup(setup.task_manager)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         await self._controller.process_frame(frame)
