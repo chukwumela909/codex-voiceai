@@ -7,10 +7,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.characters import (
+    Character,
+    DEFAULT_CHARACTER_ID,
+    SLUG_PATTERN,
+    load_characters,
+    save_character,
+)
 from app.config import get_settings
 from app.events import CLIENT_EVENT_TYPES, PLANNED_EVENT_TYPES, SERVER_EVENT_TYPES, event, new_session_id
 from app.exceptions import ClientConnectionClosed
 from app.mock_conversation import MockConversationSession
+from fastapi import HTTPException
+from pydantic import ValidationError
 
 
 settings = get_settings()
@@ -149,6 +158,47 @@ async def health() -> dict:
     }
 
 
+def _default_character_id() -> str:
+    return getattr(settings, "default_character_id", DEFAULT_CHARACTER_ID)
+
+
+@app.get("/characters")
+async def list_characters() -> dict:
+    characters = load_characters()
+    default_id = _default_character_id()
+    if default_id not in characters and characters:
+        default_id = next(iter(characters))
+    return {
+        "default": default_id,
+        "characters": [c.model_dump(exclude_none=True) for c in characters.values()],
+    }
+
+
+def _validate_character_payload(character_id: str, payload: dict) -> Character:
+    if not SLUG_PATTERN.match(character_id):
+        raise HTTPException(status_code=400, detail="Invalid character id.")
+    data = {**payload, "id": character_id}
+    try:
+        return Character.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
+@app.put("/characters/{character_id}")
+async def upsert_character(character_id: str, payload: dict) -> dict:
+    character = _validate_character_payload(character_id, payload)
+    save_character(character)
+    return character.model_dump(exclude_none=True)
+
+
+@app.post("/characters")
+async def create_character(payload: dict) -> dict:
+    character_id = str(payload.get("id", "")).strip().lower()
+    character = _validate_character_payload(character_id, payload)
+    save_character(character)
+    return character.model_dump(exclude_none=True)
+
+
 @app.get("/events")
 async def events_contract() -> dict:
     return {
@@ -241,6 +291,18 @@ async def handle_text_message(websocket: WebSocket, conversation: MockConversati
 
     message_type = data.get("type")
     if message_type == "client.hello":
+        payload = data.get("payload", {}) or {}
+        character_id = payload.get("character_id")
+        if character_id:
+            character = conversation.set_character(str(character_id))
+            await send_server_event(
+                websocket,
+                event(
+                    "character.changed",
+                    session_id,
+                    {"character": character.model_dump(exclude_none=True)},
+                ),
+            )
         await send_server_event(
             websocket,
             event(
@@ -248,9 +310,30 @@ async def handle_text_message(websocket: WebSocket, conversation: MockConversati
                 session_id,
                 {
                     "state": "client_ready",
-                    "client": data.get("payload", {}).get("client", "browser"),
+                    "client": payload.get("client", "browser"),
+                    "character_id": conversation.character.id,
                 },
             )
+        )
+        return True
+
+    if message_type == "character.select":
+        payload = data.get("payload", {}) or {}
+        character_id = str(payload.get("character_id", "")).strip()
+        if not character_id:
+            await send_server_event(
+                websocket,
+                event("error", session_id, {"message": "character.select requires character_id."}),
+            )
+            return True
+        character = conversation.set_character(character_id)
+        await send_server_event(
+            websocket,
+            event(
+                "character.changed",
+                session_id,
+                {"character": character.model_dump(exclude_none=True)},
+            ),
         )
         return True
 

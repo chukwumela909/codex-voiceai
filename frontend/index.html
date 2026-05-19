@@ -127,6 +127,37 @@
         <button id="micBtn" class="btn btn--outline btn--sm" type="button" disabled>Start mic</button>
       </div>
 
+      <section class="character" aria-label="Active character">
+        <header class="character__head">
+          <p class="caption-uppercase">Character</p>
+          <select id="characterSelect" class="character__select" aria-label="Active character"></select>
+        </header>
+        <details class="character__edit">
+          <summary>Edit character</summary>
+          <form id="characterForm" class="character__form">
+            <label>Name <input type="text" id="characterName" required /></label>
+            <label>Role <input type="text" id="characterRole" /></label>
+            <label>Grammar <input type="text" id="characterGrammar" /></label>
+            <label>Tone (one per line)
+              <textarea id="characterTone" rows="3"></textarea>
+            </label>
+            <label>Speaking style rules (one per line)
+              <textarea id="characterStyle" rows="4"></textarea>
+            </label>
+            <label>Forbidden phrases (one per line)
+              <textarea id="characterForbidden" rows="3"></textarea>
+            </label>
+            <label>Identity response style
+              <textarea id="characterIdentity" rows="2"></textarea>
+            </label>
+            <div class="character__actions">
+              <button type="submit" class="btn btn--outline btn--sm">Save</button>
+              <span id="characterSaveStatus" class="character__status"></span>
+            </div>
+          </form>
+        </details>
+      </section>
+
       <div class="metrics">
         <div class="metric">
           <span class="metric__label">Session</span>

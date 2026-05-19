@@ -24,7 +24,15 @@
       "Bash(Get-Content uvicorn-pipecat.log -Tail 20)",
       "PowerShell(Get-NetTCPConnection *)",
       "Bash(curl -s https://unpkg.com/@pipecat-ai/websocket-transport@latest/dist/websocketTransport.d.ts)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "WebSearch",
+      "Bash(.venv\\\\Scripts\\\\python.exe -m pytest tests/test_speech_tags.py tests/test_speech_director.py tests/test_groq_agent.py -x -q)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/test_speech_tags.py tests/test_speech_director.py tests/test_groq_agent.py -x -q 2>&1 | Select-Object -Last 80)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/test_speech_tags.py tests/test_speech_director.py tests/test_groq_agent.py tests/test_characters.py -q 2>&1 | Select-Object -Last 30)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/test_live_conversation.py -q -k \"directed_speech or speech_direction_fails\" 2>&1 | Select-Object -Last 30)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q 2>&1 | Select-Object -Last 15)",
+      "Bash(git stash *)"
     ]
   }
 }

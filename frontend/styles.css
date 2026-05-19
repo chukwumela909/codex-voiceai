@@ -940,3 +940,64 @@ body[data-app-state="active"] .dock__hint {
   }
   .meter__bar::before { transition: none !important; }
 }
+
+/* — Character panel — */
+.character {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xs);
+  margin-bottom: var(--sm);
+  padding: var(--xs) 0;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+}
+.character__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sm);
+}
+.character__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+}
+.character__edit summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+.character__form {
+  display: grid;
+  gap: var(--xs);
+  margin-top: var(--xs);
+}
+.character__form label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+.character__form input,
+.character__form textarea {
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  resize: vertical;
+}
+.character__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sm);
+}
+.character__status {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}

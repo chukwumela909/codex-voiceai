@@ -90,6 +90,7 @@ class Settings(BaseSettings):
         ),
         alias="VOICE_AGENT_PERSONA",
     )
+    default_character_id: str = Field(default="zara", alias="VOICE_AGENT_DEFAULT_CHARACTER")
     intent_inference_enabled: bool = Field(default=True, alias="VOICE_AGENT_INTENT_INFERENCE_ENABLED")
     cartesia_speech_director_enabled: bool = Field(
         default=True,

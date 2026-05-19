@@ -24,6 +24,7 @@ SERVER_EVENT_TYPES = {
     "proactive.state": "The proactive policy changed or reported its monitoring state.",
     "error": "A recoverable or terminal error occurred.",
     "session.ended": "The WebSocket session is closing or has closed.",
+    "character.changed": "The active character for the session has been updated.",
 }
 
 CLIENT_EVENT_TYPES = {
@@ -31,6 +32,7 @@ CLIENT_EVENT_TYPES = {
     "audio.start": "Client audio stream configuration.",
     "audio.stop": "Client audio stream stopped.",
     "session.stop": "Client requested session shutdown.",
+    "character.select": "Client selected an active character for the session.",
 }
 
 PLANNED_EVENT_TYPES = {}

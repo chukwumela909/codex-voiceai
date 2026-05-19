@@ -324,7 +324,11 @@ function connect() {
   socket.addEventListener("open", () => {
     socket.send(JSON.stringify({
       type: "client.hello",
-      payload: { client: "browser-codex-ui", version: "phase-6" }
+      payload: {
+        client: "browser-codex-ui",
+        version: "phase-6",
+        character_id: selectedCharacterId || undefined,
+      }
     }));
   });
 
@@ -1004,6 +1008,132 @@ document.addEventListener("keydown", (event) => {
     setDiagnosticsOpen(false);
   }
 });
+
+// ============================================================
+// Character selector + edit form
+// ============================================================
+
+const characterSelect = document.querySelector("#characterSelect");
+const characterForm = document.querySelector("#characterForm");
+const characterName = document.querySelector("#characterName");
+const characterRole = document.querySelector("#characterRole");
+const characterGrammar = document.querySelector("#characterGrammar");
+const characterTone = document.querySelector("#characterTone");
+const characterStyle = document.querySelector("#characterStyle");
+const characterForbidden = document.querySelector("#characterForbidden");
+const characterIdentity = document.querySelector("#characterIdentity");
+const characterSaveStatus = document.querySelector("#characterSaveStatus");
+
+const CHARACTER_STORAGE_KEY = "codex.voiceai.characterId";
+let charactersById = {};
+let selectedCharacterId = null;
+try {
+  selectedCharacterId = localStorage.getItem(CHARACTER_STORAGE_KEY);
+} catch (_) { /* localStorage unavailable */ }
+
+function linesToList(text) {
+  return text.split("\n").map((s) => s.trim()).filter(Boolean);
+}
+
+function listToLines(items) {
+  return Array.isArray(items) ? items.join("\n") : "";
+}
+
+function populateForm(character) {
+  if (!character) return;
+  characterName.value = character.name || "";
+  characterRole.value = character.role || "";
+  characterGrammar.value = character.grammar || "";
+  characterTone.value = listToLines(character.tone);
+  characterStyle.value = listToLines(character.speaking_style_rules);
+  characterForbidden.value = listToLines(character.forbidden_phrases);
+  characterIdentity.value = character.identity_response_style || "";
+}
+
+function renderCharacterOptions() {
+  if (!characterSelect) return;
+  characterSelect.innerHTML = "";
+  for (const character of Object.values(charactersById)) {
+    const option = document.createElement("option");
+    option.value = character.id;
+    option.textContent = `${character.name} — ${character.role || character.id}`;
+    characterSelect.appendChild(option);
+  }
+  if (selectedCharacterId && charactersById[selectedCharacterId]) {
+    characterSelect.value = selectedCharacterId;
+  }
+  populateForm(charactersById[characterSelect.value]);
+}
+
+async function loadCharacters() {
+  if (!characterSelect) return;
+  try {
+    const response = await fetch("/characters");
+    if (!response.ok) return;
+    const data = await response.json();
+    charactersById = {};
+    for (const character of data.characters || []) {
+      charactersById[character.id] = character;
+    }
+    if (!selectedCharacterId || !charactersById[selectedCharacterId]) {
+      selectedCharacterId = data.default;
+    }
+    renderCharacterOptions();
+  } catch (_) { /* network error — leave selector empty */ }
+}
+
+function notifyServerCharacterChange(characterId) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({
+      type: "character.select",
+      payload: { character_id: characterId },
+    }));
+  }
+}
+
+characterSelect?.addEventListener("change", () => {
+  selectedCharacterId = characterSelect.value;
+  try { localStorage.setItem(CHARACTER_STORAGE_KEY, selectedCharacterId); } catch (_) {}
+  populateForm(charactersById[selectedCharacterId]);
+  notifyServerCharacterChange(selectedCharacterId);
+});
+
+characterForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const characterId = characterSelect?.value;
+  if (!characterId) return;
+  const body = {
+    name: characterName.value.trim(),
+    role: characterRole.value.trim(),
+    grammar: characterGrammar.value.trim(),
+    tone: linesToList(characterTone.value),
+    speaking_style_rules: linesToList(characterStyle.value),
+    forbidden_phrases: linesToList(characterForbidden.value),
+    identity_response_style: characterIdentity.value.trim(),
+  };
+  characterSaveStatus.textContent = "Saving…";
+  try {
+    const response = await fetch(`/characters/${encodeURIComponent(characterId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      characterSaveStatus.textContent = `Error ${response.status}`;
+      return;
+    }
+    const saved = await response.json();
+    charactersById[saved.id] = saved;
+    renderCharacterOptions();
+    characterSaveStatus.textContent = "Saved.";
+    notifyServerCharacterChange(saved.id);
+    setTimeout(() => { characterSaveStatus.textContent = ""; }, 2000);
+  } catch (_) {
+    characterSaveStatus.textContent = "Network error.";
+  }
+});
+
+loadCharacters();
 
 // Initial state.
 initMeter();

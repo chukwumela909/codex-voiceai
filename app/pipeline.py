@@ -101,7 +101,12 @@ async def run_pipecat_session(websocket, settings: Settings) -> None:
         sample_rate=settings.cartesia_sample_rate,
     )
 
-    context = LLMContext(messages=[{"role": "system", "content": settings.persona}])
+    from app.characters import build_system_prompt, get_character
+
+    active_character = get_character(getattr(settings, "default_character_id", None))
+    context = LLMContext(
+        messages=[{"role": "system", "content": build_system_prompt(active_character)}]
+    )
     user_aggregator = LLMUserAggregator(context=context)
     assistant_aggregator = LLMAssistantAggregator(context=context)
 

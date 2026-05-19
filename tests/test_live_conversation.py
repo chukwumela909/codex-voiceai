@@ -791,7 +791,7 @@ def test_contextual_followup_live_uses_agent_path_with_proactive_instruction():
     assert internal_instruction["role"] == "user"
     assert "one concise" in internal_instruction["content"]
     assert "open phone call" in internal_instruction["content"]
-    assert "configured persona" in internal_instruction["content"]
+    assert "Stay fully in character" in internal_instruction["content"]
     assert "Do not ask why the user went silent" in internal_instruction["content"]
     assert captured_transcripts[0][0]["content"] == "I am planning a customer onboarding script."
 
@@ -1358,7 +1358,10 @@ def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_p
 
     class ClarifyingAgent:
         async def stream_response(self, transcript):
-            yield "Well, I think you meant the Deepgram model is missing words."
+            yield (
+                'Well,<break time="180ms"/> I think you meant '
+                '<prosody rate="fast">the Deepgram</prosody> model is missing words.'
+            )
 
     class StreamingSynthesizer:
         async def stream_speech_chunks(self, chunks, *, context_id):
@@ -1395,14 +1398,18 @@ def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_p
     asyncio.run(run_session())
 
     final = next(event for event in events if event["type"] == "agent.text.final")
-    assert final["payload"]["text"] == "Well, I think you meant the Deepgram model is missing words."
+    assert final["payload"]["text"] == (
+        'Well,<break time="180ms"/> I think you meant '
+        '<prosody rate="fast">the Deepgram</prosody> model is missing words.'
+    )
     assert spoken_chunks == [
-        'Well,<break time="180ms"/> I think you meant<break time="250ms"/> the Deepgram model is missing words. '
+        'Well,<break time="180ms"/> I think you meant the Deepgram model is missing words. '
     ]
     assert any(
         event["type"] == "pipeline.stage"
         and event["payload"].get("stage") == "tts_speech_direction"
         and event["payload"].get("directed") is True
+        and event["payload"].get("tags_stripped", 0) >= 1
         for event in events
     )
 
@@ -1421,7 +1428,7 @@ def test_cartesia_uses_plain_text_when_speech_direction_fails(monkeypatch):
     def failing_director(text, config):
         raise RuntimeError("direction unavailable")
 
-    monkeypatch.setattr(mock_conversation, "direct_speech_for_cartesia", failing_director)
+    monkeypatch.setattr(mock_conversation, "direct_speech_for_cartesia_detailed", failing_director)
 
     async def send_event(event):
         events.append(event)

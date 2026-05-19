@@ -1,37 +1,61 @@
 from app.speech_director import SpeechDirectionConfig, direct_speech_for_cartesia
 
 
-def test_director_leaves_short_acknowledgement_plain():
+def test_director_leaves_plain_text_untouched():
     config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
 
     assert direct_speech_for_cartesia("Okay.", config) == "Okay."
 
 
-def test_director_adds_pause_after_contextual_discourse_marker():
+def test_director_passes_through_allowed_break_tag():
     config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
 
-    directed = direct_speech_for_cartesia("Well, I think you were asking about the microphone.", config)
-
-    assert directed == 'Well,<break time="180ms"/> I think you were asking about the microphone.'
-
-
-def test_director_adds_clarification_pause_when_inferring_intent():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    directed = direct_speech_for_cartesia("I think you meant the Deepgram model is missing words.", config)
-
-    assert directed == 'I think you meant<break time="250ms"/> the Deepgram model is missing words.'
-
-
-def test_director_preserves_existing_ssml_tags():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    text = 'Well,<break time="120ms"/> keep this as authored.'
+    text = 'Well,<break time="180ms"/> let me think.'
 
     assert direct_speech_for_cartesia(text, config) == text
 
 
-def test_director_skips_direction_when_plain_text_has_xml_sensitive_characters():
+def test_director_passes_through_allowed_emotion_and_spell():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = '<emotion value="excited"/> The <spell>API</spell> is live!'
+
+    assert direct_speech_for_cartesia(text, config) == text
+
+
+def test_director_strips_unknown_tag_but_keeps_inner_text():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = "Hello <prosody rate=\"fast\">world</prosody> there."
+
+    assert direct_speech_for_cartesia(text, config) == "Hello world there."
+
+
+def test_director_strips_emotion_with_unknown_label():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = '<emotion value="grumpy"/> Hi.'
+
+    assert direct_speech_for_cartesia(text, config) == " Hi."
+
+
+def test_director_strips_break_with_malformed_time():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = 'Sure<break time="forever"/> let me think.'
+
+    assert direct_speech_for_cartesia(text, config) == "Sure let me think."
+
+
+def test_director_strips_unbalanced_paired_tag():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+
+    text = "Read <spell>API and continue."
+
+    assert direct_speech_for_cartesia(text, config) == "Read API and continue."
+
+
+def test_director_passes_through_stray_xml_sensitive_chars():
     config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
 
     text = "Use R&D API on x < 8000."
@@ -39,29 +63,25 @@ def test_director_skips_direction_when_plain_text_has_xml_sensitive_characters()
     assert direct_speech_for_cartesia(text, config) == text
 
 
-def test_director_spells_code_like_tokens():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
+def test_director_can_disable_ssml_handling():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=False)
 
-    directed = direct_speech_for_cartesia("Set API mode on port 8000.", config)
-
-    assert directed == "Set <spell>API</spell> mode on port <spell>8000</spell>."
-
-
-def test_director_does_not_spell_ordinary_hyphenated_words():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    text = "This follow-up can be a quick check-in on the phone-call flow."
+    text = '<emotion value="excited"/> Hi.'
 
     assert direct_speech_for_cartesia(text, config) == text
 
 
-def test_director_can_be_disabled():
+def test_director_drops_emotion_tag_when_emotion_disabled():
+    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True, emotion_tags_enabled=False)
+
+    text = '<emotion value="excited"/> Hi.'
+
+    assert direct_speech_for_cartesia(text, config) == " Hi."
+
+
+def test_director_can_be_disabled_entirely():
     config = SpeechDirectionConfig(enabled=False, ssml_enabled=True)
 
-    assert direct_speech_for_cartesia("Well, this should stay plain.", config) == "Well, this should stay plain."
+    text = '<emotion value="excited"/> Hi.'
 
-
-def test_director_can_disable_ssml_only():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=False)
-
-    assert direct_speech_for_cartesia("Set API mode.", config) == "Set API mode."
+    assert direct_speech_for_cartesia(text, config) == text

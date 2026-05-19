@@ -12,6 +12,7 @@ from app.conversation_context import agent_transcript_with_intent_inference
 from app.deepgram import DeepgramStreamingTranscriber
 from app.events import event
 from app.exceptions import ClientConnectionClosed
+from app.characters import Character, build_system_prompt, get_character
 from app.groq_agent import GroqStreamingAgent, pop_speakable_chunks
 from app.proactive import (
     TRIGGER_CONTEXTUAL_FOLLOW_UP,
@@ -21,7 +22,7 @@ from app.proactive import (
     ProactivePolicy,
     ProactivePolicyConfig,
 )
-from app.speech_director import SpeechDirectionConfig, direct_speech_for_cartesia
+from app.speech_director import SpeechDirectionConfig, direct_speech_for_cartesia_detailed
 
 SendEvent = Callable[[dict], Awaitable[None]]
 RECENT_CONTEXT_TURN_LIMIT = 8
@@ -36,7 +37,7 @@ PROACTIVE_STARTUP_GREETING_INSTRUCTION = (
 PROACTIVE_FOLLOWUP_INSTRUCTION = (
     "Initiate one concise, spoken-friendly proactive turn for an ambiguous open phone call "
     "based on the recent conversation. "
-    "Use one brief question or observation. Stay within the configured persona. Do not introduce a new topic. "
+    "Use one brief question or observation. Stay fully in character. Do not introduce a new topic. "
     "Do not ask why the user went silent. Do not apologize. Keep it under 25 words."
 )
 PROACTIVE_SILENCE_NUDGE_INSTRUCTION = (
@@ -55,6 +56,7 @@ class MockConversationSession:
         self.audio_config: dict | None = None
         self.transcriber: DeepgramStreamingTranscriber | None = None
         self.agent: GroqStreamingAgent | None = None
+        self.character: Character = get_character(getattr(settings, "default_character_id", None))
         self.synthesizer: CartesiaStreamingTTS | None = None
         self.proactive_config = ProactivePolicyConfig.from_settings(settings)
         self.proactive_policy = ProactivePolicy(self.proactive_config)
@@ -1002,15 +1004,15 @@ class MockConversationSession:
         config = SpeechDirectionConfig(
             enabled=bool(getattr(self.settings, "cartesia_speech_director_enabled", True)),
             ssml_enabled=bool(getattr(self.settings, "cartesia_ssml_enabled", True)),
-            emotion_tags_enabled=bool(getattr(self.settings, "cartesia_emotion_tags_enabled", False)),
+            emotion_tags_enabled=bool(getattr(self.settings, "cartesia_emotion_tags_enabled", True)),
         )
         try:
-            directed = direct_speech_for_cartesia(text, config)
+            result = direct_speech_for_cartesia_detailed(text, config)
         except Exception as exc:
             await self.send_provider_error("cartesia", f"Speech direction failed: {exc}", metadata=metadata)
             return text
 
-        if directed != text:
+        if result.text != text or result.stripped:
             await self.send_event(
                 event(
                     "pipeline.stage",
@@ -1019,11 +1021,12 @@ class MockConversationSession:
                         "stage": "tts_speech_direction",
                         "provider": "cartesia",
                         "directed": True,
+                        "tags_stripped": result.stripped,
                         **metadata,
                     },
                 )
             )
-        return directed
+        return result.text
 
     async def _stream_tts_fallback(
         self,
@@ -1303,9 +1306,14 @@ class MockConversationSession:
         self.agent = GroqStreamingAgent(
             api_key=self.settings.groq_api_key,
             model=self.settings.groq_model,
-            persona=self.settings.persona,
+            persona=build_system_prompt(self.character),
             temperature=self.settings.groq_temperature,
         )
+
+    def set_character(self, character_id: str) -> Character:
+        self.character = get_character(character_id)
+        self.agent = None
+        return self.character
 
     async def _live_user_agent_transcript(self, *, metadata: dict | None = None) -> list[dict[str, str]]:
         metadata = metadata or {}
