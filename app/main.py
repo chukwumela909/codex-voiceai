@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -146,6 +146,57 @@ async def pipecat_ws(websocket: WebSocket) -> None:
         log_info("pipecat ws client disconnected", session_id=session_id)
     except Exception:
         logger.exception("pipecat session failed", extra={"session_id": session_id})
+        raise
+
+
+@app.api_route("/twiml", methods=["GET", "POST"])
+async def twiml(request: Request) -> Response:
+    """TwiML that bridges an inbound Twilio call to our Media Streams WebSocket.
+
+    `<Connect><Stream>` is bidirectional so the caller hears the agent's TTS;
+    `<Start><Stream>` would be listen-only. `PUBLIC_HOST` is preferred over the
+    request hostname, which behind a proxy can resolve to the internal bind
+    address and yield a wss:// URL Twilio cannot reach.
+    """
+    host = settings.public_host or request.url.hostname
+    ws_url = f"wss://{host}/api/twilio-ws"
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Response><Connect><Stream url="{ws_url}"/></Connect></Response>'
+    )
+    return Response(content=xml, media_type="text/xml")
+
+
+@app.websocket("/api/twilio-ws")
+async def twilio_ws(websocket: WebSocket) -> None:
+    """Twilio Media Streams transport for the Pipecat pipeline.
+
+    Twilio sends a `connected` text frame, then a `start` frame carrying the
+    streamSid/callSid. Both must be consumed here before the serializer is
+    built, so we read them before handing off to the pipeline.
+    """
+    await websocket.accept()
+    session_id = new_session_id()
+
+    start_iter = websocket.iter_text()
+    try:
+        await start_iter.__anext__()  # {"event": "connected", ...}
+        call_data = json.loads(await start_iter.__anext__())  # {"event": "start", ...}
+    except (StopAsyncIteration, WebSocketDisconnect):
+        log_info("twilio ws closed before start", session_id=session_id)
+        return
+    stream_sid = call_data["start"]["streamSid"]
+    call_sid = call_data["start"]["callSid"]
+    log_info("twilio media stream started", session_id=session_id)
+
+    from app.pipeline import run_twilio_session
+
+    try:
+        await run_twilio_session(websocket, stream_sid, call_sid, settings)
+    except WebSocketDisconnect:
+        log_info("twilio ws disconnected", session_id=session_id)
+    except Exception:
+        logger.exception("twilio session failed", extra={"session_id": session_id})
         raise
 
 

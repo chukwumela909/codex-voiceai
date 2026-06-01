@@ -72,19 +72,13 @@ GREETING_INSTRUCTION = (
 )
 
 
-async def run_pipecat_session(websocket, settings: Settings) -> None:
-    """Build and run a Pipecat pipeline against an accepted FastAPI WebSocket."""
+def build_session_task(transport: FastAPIWebsocketTransport, settings: Settings) -> PipelineTask:
+    """Wire STT/LLM/TTS, aggregators, and idle/greeting handlers onto a transport.
 
-    transport = FastAPIWebsocketTransport(
-        websocket=websocket,
-        params=FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            add_wav_header=False,
-            vad_analyzer=SileroVADAnalyzer(),
-            serializer=ProtobufFrameSerializer(),
-        ),
-    )
+    Transport-agnostic so the browser (`run_pipecat_session`) and telephony
+    (`run_twilio_session`) paths share identical pipeline behavior and only
+    differ in how the transport is constructed.
+    """
 
     stt = DeepgramSTTService(api_key=settings.deepgram_api_key)
 
@@ -164,5 +158,66 @@ async def run_pipecat_session(websocket, settings: Settings) -> None:
         logger.info("pipecat client disconnected")
         await task.cancel()
 
+    return task
+
+
+async def run_pipecat_session(websocket, settings: Settings) -> None:
+    """Build and run a Pipecat pipeline against an accepted browser WebSocket."""
+
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket,
+        params=FastAPIWebsocketParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            add_wav_header=False,
+            vad_analyzer=SileroVADAnalyzer(),
+            serializer=ProtobufFrameSerializer(),
+        ),
+    )
+
+    task = build_session_task(transport, settings)
+    runner = PipelineRunner(handle_sigint=False)
+    await runner.run(task)
+
+
+async def run_twilio_session(
+    websocket,
+    stream_sid: str,
+    call_sid: str,
+    settings: Settings,
+) -> None:
+    """Build and run a Pipecat pipeline against a Twilio Media Streams WebSocket.
+
+    Twilio media is 8 kHz µ-law; the TwilioFrameSerializer transcodes to/from
+    the pipeline's PCM and speaks the Twilio Media Streams protocol. The
+    `connected`/`start` handshake (which yields `stream_sid`/`call_sid`) must
+    already have been consumed by the caller before this runs.
+    """
+
+    from pipecat.serializers.twilio import TwilioFrameSerializer
+
+    has_credentials = bool(settings.twilio_account_sid and settings.twilio_auth_token)
+    serializer = TwilioFrameSerializer(
+        stream_sid=stream_sid,
+        call_sid=call_sid,
+        account_sid=settings.twilio_account_sid,
+        auth_token=settings.twilio_auth_token,
+        params=TwilioFrameSerializer.InputParams(auto_hang_up=has_credentials),
+    )
+
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket,
+        params=FastAPIWebsocketParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            add_wav_header=False,
+            audio_in_sample_rate=8000,
+            audio_out_sample_rate=8000,
+            vad_analyzer=SileroVADAnalyzer(),
+            serializer=serializer,
+        ),
+    )
+
+    task = build_session_task(transport, settings)
     runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)

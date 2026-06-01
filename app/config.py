@@ -15,10 +15,10 @@ MOCK_PROACTIVE_REPEAT_COOLDOWN_MS = 8000
 LIVE_PROACTIVE_REPEAT_COOLDOWN_MS = 60000
 MOCK_PROACTIVE_MAX_CONSECUTIVE_PROMPTS = 3
 LIVE_PROACTIVE_MAX_CONSECUTIVE_PROMPTS = 1
-DEFAULT_DEEPGRAM_ENDPOINTING_MS = 220
+DEFAULT_DEEPGRAM_ENDPOINTING_MS = 200
 MIN_DEEPGRAM_UTTERANCE_END_MS = 1000
 DEFAULT_DEEPGRAM_UTTERANCE_END_MS = MIN_DEEPGRAM_UTTERANCE_END_MS
-DEFAULT_PARTIAL_IDLE_FINALIZE_MS = 1000
+DEFAULT_PARTIAL_IDLE_FINALIZE_MS = 500
 DEFAULT_AMBIENCE_VOLUME = 0.035
 DEFAULT_INPUT_GAIN = 2.0
 
@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     cartesia_version: str = Field(default="2026-03-01", alias="CARTESIA_VERSION")
     cartesia_open_timeout_seconds: float = Field(default=8.0, gt=0, alias="CARTESIA_OPEN_TIMEOUT_SECONDS")
     cartesia_connect_retries: int = Field(default=1, ge=0, alias="CARTESIA_CONNECT_RETRIES")
+    twilio_account_sid: str | None = Field(default=None, alias="TWILIO_ACCOUNT_SID")
+    twilio_auth_token: str | None = Field(default=None, alias="TWILIO_AUTH_TOKEN")
+    public_host: str | None = Field(default=None, alias="PUBLIC_HOST")
     persona: str = Field(
         default=(
             "You are a concise, warm voice on an ambiguous open phone call. "
