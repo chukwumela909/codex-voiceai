@@ -121,6 +121,17 @@ class Settings(BaseSettings):
         default=True,
         alias="VOICE_AGENT_PROACTIVE_CONTEXTUAL_FOLLOWUPS_ENABLED",
     )
+    memory_enabled: str = Field(default="auto", alias="VOICE_AGENT_MEMORY_ENABLED")
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    memory_embedding_provider: str = Field(default="openai", alias="VOICE_AGENT_MEMORY_EMBEDDING_PROVIDER")
+    memory_embedding_model: str = Field(default="text-embedding-3-small", alias="VOICE_AGENT_MEMORY_EMBEDDING_MODEL")
+    memory_top_k: int = Field(default=5, ge=1, le=50, alias="VOICE_AGENT_MEMORY_TOP_K")
+    memory_dedupe_threshold: float = Field(default=0.92, ge=0.0, le=1.0, alias="VOICE_AGENT_MEMORY_DEDUPE_THRESHOLD")
+    memory_dir: str = Field(default="data/memory", alias="VOICE_AGENT_MEMORY_DIR")
+    memory_session_summary_enabled: bool = Field(
+        default=True,
+        alias="VOICE_AGENT_MEMORY_SESSION_SUMMARY_ENABLED",
+    )
 
     @field_validator("cartesia_voice_id", mode="before")
     @classmethod
@@ -223,6 +234,20 @@ class Settings(BaseSettings):
             return LIVE_PROACTIVE_MAX_CONSECUTIVE_PROMPTS
         return MOCK_PROACTIVE_MAX_CONSECUTIVE_PROMPTS
 
+    @property
+    def normalized_memory_enabled(self) -> str:
+        return self.memory_enabled.strip().lower()
+
+    @property
+    def memory_effective_enabled(self) -> bool:
+        configured = self.normalized_memory_enabled
+        if configured in {"", "auto", "default"}:
+            # On by default in mock; explicit opt-in for live (like proactive).
+            return self.normalized_mode != "live"
+        if configured in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        return False
+
     def missing_live_keys(self) -> list[str]:
         missing: list[str] = []
         if not self.deepgram_api_key:
@@ -268,6 +293,18 @@ class Settings(BaseSettings):
             },
             "conversation": {
                 "intent_inference_enabled": self.intent_inference_enabled,
+            },
+            "memory": {
+                "configured": self.normalized_memory_enabled,
+                "enabled": self.memory_effective_enabled,
+                "embedding_provider": self.memory_embedding_provider,
+                "embedder_ready": (
+                    self.normalized_mode == "live"
+                    and self.memory_embedding_provider.strip().lower() == "openai"
+                    and bool(self.openai_api_key)
+                ),
+                "top_k": self.memory_top_k,
+                "session_summary_enabled": self.memory_session_summary_enabled,
             },
             "cartesia": {
                 "connection": {

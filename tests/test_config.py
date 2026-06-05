@@ -115,14 +115,14 @@ def test_balanced_fast_voice_timing_defaults(monkeypatch):
     settings = Settings(_env_file=None)
     status = settings.public_config_status()
 
-    assert settings.deepgram_endpointing_ms == 220
+    assert settings.deepgram_endpointing_ms == 200
     assert settings.deepgram_utterance_end_ms == 1000
-    assert settings.partial_idle_finalize_ms == 1000
+    assert settings.partial_idle_finalize_ms == 500
     assert settings.input_gain == 2.0
     assert status["turn_timing"] == {
-        "deepgram_endpointing_ms": 220,
+        "deepgram_endpointing_ms": 200,
         "deepgram_utterance_end_ms": 1000,
-        "partial_idle_finalize_ms": 1000,
+        "partial_idle_finalize_ms": 500,
     }
     assert status["audio"] == {
         "input_gain": 2.0,

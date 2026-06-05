@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.events import CLIENT_EVENT_TYPES, PLANNED_EVENT_TYPES, SERVER_EVENT_TYPES, event, new_session_id
 from app.exceptions import ClientConnectionClosed
 from app.mock_conversation import MockConversationSession
+from app.preview import preview_character
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -125,6 +126,11 @@ async def index() -> FileResponse:
 @app.get("/pipecat")
 async def pipecat_spike_page() -> FileResponse:
     return FileResponse("frontend/pipecat.html")
+
+
+@app.get("/studio")
+async def personality_studio_page() -> FileResponse:
+    return FileResponse("frontend/studio.html")
 
 
 @app.websocket("/api/ws")
@@ -248,6 +254,58 @@ async def create_character(payload: dict) -> dict:
     character = _validate_character_payload(character_id, payload)
     save_character(character)
     return character.model_dump(exclude_none=True)
+
+
+def _coerce_preview_character(data: dict) -> Character:
+    """Build a Character from an in-editor draft that may be unsaved/incomplete.
+
+    Lenient on purpose: a brand-new draft can lack a valid id and have empty
+    name/role, so we fill safe placeholders rather than reject the preview.
+    """
+    raw_id = str(data.get("id", "") or "").strip().lower()
+    char_id = raw_id if SLUG_PATTERN.match(raw_id) else "preview"
+    payload = {
+        **data,
+        "id": char_id,
+        "name": (str(data.get("name") or "").strip() or "Preview"),
+        "role": (str(data.get("role") or "").strip() or "voice assistant"),
+    }
+    try:
+        return Character.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
+@app.post("/characters/preview")
+async def preview_character_endpoint(payload: dict) -> dict:
+    message = str(payload.get("message", "") or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="preview requires a non-empty message.")
+    char_data = payload.get("character")
+    if not isinstance(char_data, dict):
+        raise HTTPException(status_code=400, detail="preview requires a character object.")
+    character = _coerce_preview_character(char_data)
+    return await preview_character(character, message, settings)
+
+
+@app.get("/memory")
+async def list_memory() -> dict:
+    from app.memory import get_store
+
+    store = get_store(settings)
+    return {
+        "enabled": settings.memory_effective_enabled,
+        "count": store.count(),
+        "memories": [record.public() for record in store.all()],
+    }
+
+
+@app.delete("/memory")
+async def clear_memory() -> dict:
+    from app.memory import get_store
+
+    removed = get_store(settings).clear()
+    return {"cleared": removed}
 
 
 @app.get("/events")

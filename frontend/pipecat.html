@@ -4,35 +4,329 @@
     <meta charset="utf-8" />
     <title>Pipecat Spike — Voice Agent</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
-      button { font-size: 1rem; padding: 0.5rem 1rem; margin-right: 0.5rem; }
-      #status { margin-top: 1rem; font-family: ui-monospace, monospace; white-space: pre-wrap; }
-      .row { margin-top: 1rem; }
+      :root {
+        --bg: #0c0a09;
+        --panel: #1c1917;
+        --ink: #f5f5f4;
+        --muted: #a8a29e;
+        --hairline: #292524;
+        --accent: #a7e5d3;
+        --speak: #f4c5a8;
+        --error: #fca5a5;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        max-width: 760px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        background: var(--bg);
+        color: var(--ink);
+        line-height: 1.5;
+      }
+      h1 { font-weight: 500; letter-spacing: -0.02em; margin: 0 0 0.25rem; }
+      p.lede { color: var(--muted); margin: 0 0 1.5rem; }
+      code { background: var(--panel); padding: 1px 6px; border-radius: 4px; font-size: 0.9em; }
+
+      .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+      button {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 160ms ease, border-color 160ms ease;
+      }
+      button:hover:not(:disabled) { background: #292524; border-color: #44403c; }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+      .pills { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+      .pill {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .pill .dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--muted);
+        transition: background 200ms ease, box-shadow 240ms ease;
+      }
+      .pill[data-on="true"] { color: var(--ink); }
+      .pill[data-on="true"] .dot {
+        background: var(--accent);
+        box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 22%, transparent);
+      }
+      .pill[data-on="speaking"] .dot {
+        background: var(--speak);
+        box-shadow: 0 0 0 4px color-mix(in oklab, var(--speak) 30%, transparent);
+        animation: pulse 1.1s ease-in-out infinite;
+      }
+      .pill[data-on="error"] .dot { background: var(--error); }
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50%      { transform: scale(1.35); }
+      }
+
+      .viz {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 1rem;
+      }
+      .viz canvas {
+        display: block;
+        width: 100%;
+        height: 96px;
+        background: transparent;
+      }
+      .viz__caption {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        margin-bottom: 8px;
+        display: flex; justify-content: space-between;
+      }
+
+      .transcript {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        padding: 14px;
+        min-height: 140px;
+        margin-bottom: 1rem;
+      }
+      .transcript__head {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .transcript__lines {
+        display: flex; flex-direction: column; gap: 6px;
+        max-height: 240px;
+        overflow-y: auto;
+      }
+      .transcript__line { color: var(--ink); }
+      .transcript__line--bot { color: color-mix(in oklab, var(--accent) 70%, var(--ink)); }
+      .transcript__partial {
+        color: var(--muted);
+        font-style: italic;
+        min-height: 1.4em;
+      }
+      .transcript__empty { color: var(--muted); font-style: italic; }
+
+      details { background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 0 12px; }
+      details summary { cursor: pointer; padding: 10px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+      #status { margin: 0 0 12px; font-family: ui-monospace, monospace; white-space: pre-wrap; font-size: 12px; color: var(--muted); max-height: 200px; overflow-y: auto; }
     </style>
   </head>
   <body>
     <h1>Pipecat Spike</h1>
-    <p>WebSocket client for the Pipecat-based pipeline at <code>/api/ws</code>.</p>
-    <div class="row">
+    <p class="lede">WebSocket client for the Pipecat-based pipeline at <code>/api/ws</code>.</p>
+
+    <div class="controls">
       <button id="connect">Connect</button>
       <button id="disconnect" disabled>Disconnect</button>
     </div>
-    <pre id="status">idle</pre>
+
+    <div class="pills">
+      <span class="pill" id="connPill" data-on="false">
+        <span class="dot"></span><span id="connLabel">disconnected</span>
+      </span>
+      <span class="pill" id="micPill" data-on="false">
+        <span class="dot"></span><span id="micLabel">mic off</span>
+      </span>
+      <span class="pill" id="speakPill" data-on="false">
+        <span class="dot"></span><span id="speakLabel">silent</span>
+      </span>
+    </div>
+
+    <div class="viz">
+      <div class="viz__caption">
+        <span>Microphone</span>
+        <span id="vizHint">connect to begin</span>
+      </div>
+      <canvas id="meter" width="720" height="96"></canvas>
+    </div>
+
+    <div class="transcript">
+      <div class="transcript__head">Live transcript</div>
+      <div class="transcript__lines" id="transcriptLines">
+        <div class="transcript__empty" id="transcriptEmpty">Waiting for speech…</div>
+      </div>
+      <div class="transcript__partial" id="transcriptPartial"></div>
+    </div>
+
+    <details>
+      <summary>Event log</summary>
+      <pre id="status">idle</pre>
+    </details>
 
     <script type="module">
       import { PipecatClient } from "https://cdn.jsdelivr.net/npm/@pipecat-ai/client-js@1/+esm";
       import { WebSocketTransport } from "https://cdn.jsdelivr.net/npm/@pipecat-ai/websocket-transport@1/+esm";
 
+      // --- DOM ---
       const statusEl = document.getElementById("status");
       const connectBtn = document.getElementById("connect");
       const disconnectBtn = document.getElementById("disconnect");
+      const connPill = document.getElementById("connPill");
+      const connLabel = document.getElementById("connLabel");
+      const micPill = document.getElementById("micPill");
+      const micLabel = document.getElementById("micLabel");
+      const speakPill = document.getElementById("speakPill");
+      const speakLabel = document.getElementById("speakLabel");
+      const canvas = document.getElementById("meter");
+      const ctx2d = canvas.getContext("2d");
+      const vizHint = document.getElementById("vizHint");
+      const transcriptLines = document.getElementById("transcriptLines");
+      const transcriptEmpty = document.getElementById("transcriptEmpty");
+      const transcriptPartial = document.getElementById("transcriptPartial");
 
+      // --- Log ---
       function log(...args) {
         const line = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
         statusEl.textContent += "\n" + line;
+        statusEl.scrollTop = statusEl.scrollHeight;
         console.log(...args);
       }
 
+      // --- Pills ---
+      function setPill(pill, labelEl, state, text) {
+        pill.dataset.on = state;
+        labelEl.textContent = text;
+      }
+
+      // --- Transcript ---
+      function appendFinal(text, who = "user") {
+        if (!text) return;
+        if (transcriptEmpty) transcriptEmpty.remove();
+        const div = document.createElement("div");
+        div.className = "transcript__line" + (who === "bot" ? " transcript__line--bot" : "");
+        div.textContent = (who === "bot" ? "Bot: " : "You: ") + text;
+        transcriptLines.appendChild(div);
+        transcriptLines.scrollTop = transcriptLines.scrollHeight;
+      }
+
+      function setPartial(text) {
+        transcriptPartial.textContent = text || "";
+      }
+
+      // --- Visualizer ---
+      let audioCtx = null;
+      let analyser = null;
+      let analyserSource = null;
+      let analyserStream = null;
+      let rafId = null;
+
+      function fitCanvas() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = Math.round(rect.width * dpr);
+        canvas.height = Math.round(rect.height * dpr);
+        ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      window.addEventListener("resize", fitCanvas);
+      fitCanvas();
+
+      const BAR_COUNT = 48;
+      const idleNoise = new Array(BAR_COUNT).fill(0);
+
+      function drawIdleBars() {
+        const rect = canvas.getBoundingClientRect();
+        const w = rect.width, h = rect.height;
+        ctx2d.clearRect(0, 0, w, h);
+        const gap = 3;
+        const bw = (w - gap * (BAR_COUNT - 1)) / BAR_COUNT;
+        ctx2d.fillStyle = "#3f3f3f";
+        for (let i = 0; i < BAR_COUNT; i += 1) {
+          const x = i * (bw + gap);
+          const bh = 4;
+          ctx2d.fillRect(x, (h - bh) / 2, bw, bh);
+        }
+      }
+      drawIdleBars();
+
+      function startAnalyserFromTrack(track) {
+        if (!track) return false;
+        try {
+          stopAnalyser();
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          analyserStream = new MediaStream([track]);
+          analyserSource = audioCtx.createMediaStreamSource(analyserStream);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.75;
+          analyserSource.connect(analyser);
+          renderLoop();
+          return true;
+        } catch (e) {
+          log("visualizer init failed:", e?.message ?? e);
+          return false;
+        }
+      }
+
+      function stopAnalyser() {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = null;
+        stopVadDrivenLoop();
+        if (analyserSource) { try { analyserSource.disconnect(); } catch {} analyserSource = null; }
+        if (audioCtx) { try { audioCtx.close(); } catch {} audioCtx = null; }
+        analyser = null;
+        analyserStream = null;
+        drawIdleBars();
+      }
+
+      function renderLoop() {
+        if (!analyser) return;
+        const bins = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(bins);
+
+        const rect = canvas.getBoundingClientRect();
+        const w = rect.width, h = rect.height;
+        ctx2d.clearRect(0, 0, w, h);
+
+        const gap = 3;
+        const bw = (w - gap * (BAR_COUNT - 1)) / BAR_COUNT;
+        const step = Math.floor(bins.length / BAR_COUNT) || 1;
+
+        // Pick colour by speaking state
+        const speaking = speakPill.dataset.on === "speaking";
+        const grad = ctx2d.createLinearGradient(0, h, 0, 0);
+        if (speaking) {
+          grad.addColorStop(0, "#f4c5a8");
+          grad.addColorStop(1, "#e8b8c4");
+        } else {
+          grad.addColorStop(0, "#a8c8e8");
+          grad.addColorStop(1, "#a7e5d3");
+        }
+        ctx2d.fillStyle = grad;
+
+        for (let i = 0; i < BAR_COUNT; i += 1) {
+          const v = bins[i * step] / 255; // 0..1
+          const targetH = Math.max(4, v * (h - 4));
+          // light smoothing so idle is calm
+          idleNoise[i] = idleNoise[i] * 0.6 + targetH * 0.4;
+          const bh = idleNoise[i];
+          const x = i * (bw + gap);
+          ctx2d.fillRect(x, h - bh, bw, bh);
+        }
+
+        rafId = requestAnimationFrame(renderLoop);
+      }
+
+      // --- Pipecat client ---
       const wsScheme = location.protocol === "https:" ? "wss" : "ws";
       const wsUrl = `${wsScheme}://${location.host}/api/ws`;
 
@@ -41,32 +335,127 @@
         enableMic: true,
         enableCam: false,
         callbacks: {
-          onConnected:            () => log("connected"),
-          onDisconnected:         () => {
+          onConnected: () => {
+            log("connected");
+            setPill(connPill, connLabel, "true", "connected");
+          },
+          onDisconnected: () => {
             log("disconnected");
+            setPill(connPill, connLabel, "false", "disconnected");
+            setPill(micPill, micLabel, "false", "mic off");
+            setPill(speakPill, speakLabel, "false", "silent");
+            vizHint.textContent = "connect to begin";
+            stopAnalyser();
             connectBtn.disabled = false;
             disconnectBtn.disabled = true;
           },
-          onBotConnected:         () => log("bot connected"),
-          onBotReady:             () => log("bot ready"),
-          onUserStartedSpeaking:  () => log("user speaking"),
-          onUserStoppedSpeaking:  () => log("user stopped"),
-          onBotStartedSpeaking:   () => log("bot speaking"),
-          onBotStoppedSpeaking:   () => log("bot stopped"),
-          onUserTranscript:       (d) => d.final && log("you:", d.text),
-          onBotTranscript:        (d) => log("bot:", d.text),
-          onError:                (e) => log("error:", e?.message ?? e),
+          onBotConnected: () => log("bot connected"),
+          onBotReady: () => {
+            log("bot ready");
+            // Try to grab the local mic track once the pipeline is alive.
+            attachMicVisualizer();
+          },
+          onUserStartedSpeaking: () => {
+            log("user speaking");
+            setPill(speakPill, speakLabel, "speaking", "speaking");
+          },
+          onUserStoppedSpeaking: () => {
+            log("user stopped");
+            setPill(speakPill, speakLabel, "true", "silent");
+          },
+          onBotStartedSpeaking: () => log("bot speaking"),
+          onBotStoppedSpeaking: () => log("bot stopped"),
+          onUserTranscript: (d) => {
+            if (!d) return;
+            if (d.final) {
+              appendFinal(d.text, "user");
+              setPartial("");
+            } else {
+              setPartial(d.text || "");
+            }
+          },
+          onBotTranscript: (d) => {
+            log("bot:", d?.text);
+            appendFinal(d?.text, "bot");
+          },
+          onError: (e) => {
+            log("error:", e?.message ?? e);
+            setPill(connPill, connLabel, "error", "error");
+          },
         },
       });
+
+      function attachMicVisualizer() {
+        // Only tap Pipecat's own local audio track — never open a second mic stream,
+        // which would conflict with Pipecat's AEC/AGC settings.
+        let track = null;
+        try {
+          if (typeof client.tracks === "function") {
+            const t = client.tracks();
+            track = t?.local?.audio || null;
+          }
+        } catch (e) {
+          log("client.tracks() unavailable:", e?.message ?? e);
+        }
+
+        if (track && startAnalyserFromTrack(track)) {
+          setPill(micPill, micLabel, "true", "mic on");
+          vizHint.textContent = "live";
+        } else {
+          // No safe way to read the level — drive bars from VAD speaking state instead.
+          setPill(micPill, micLabel, "true", "mic on");
+          vizHint.textContent = "vad-driven";
+          startVadDrivenLoop();
+        }
+      }
+
+      // Synthetic bars driven by VAD speaking state — used when we can't tap the track.
+      let vadRafId = null;
+      function startVadDrivenLoop() {
+        stopVadDrivenLoop();
+        const tick = () => {
+          const rect = canvas.getBoundingClientRect();
+          const w = rect.width, h = rect.height;
+          ctx2d.clearRect(0, 0, w, h);
+          const gap = 3;
+          const bw = (w - gap * (BAR_COUNT - 1)) / BAR_COUNT;
+          const speaking = speakPill.dataset.on === "speaking";
+          const grad = ctx2d.createLinearGradient(0, h, 0, 0);
+          if (speaking) {
+            grad.addColorStop(0, "#f4c5a8");
+            grad.addColorStop(1, "#e8b8c4");
+          } else {
+            grad.addColorStop(0, "#a8c8e8");
+            grad.addColorStop(1, "#a7e5d3");
+          }
+          ctx2d.fillStyle = grad;
+          const now = performance.now() / 1000;
+          for (let i = 0; i < BAR_COUNT; i += 1) {
+            const noise = Math.sin(now * 6 + i * 0.7) * 0.5 + 0.5;
+            const target = speaking ? (8 + noise * (h - 12)) : (4 + noise * 6);
+            idleNoise[i] = idleNoise[i] * 0.7 + target * 0.3;
+            const x = i * (bw + gap);
+            ctx2d.fillRect(x, h - idleNoise[i], bw, idleNoise[i]);
+          }
+          vadRafId = requestAnimationFrame(tick);
+        };
+        vadRafId = requestAnimationFrame(tick);
+      }
+      function stopVadDrivenLoop() {
+        if (vadRafId) cancelAnimationFrame(vadRafId);
+        vadRafId = null;
+      }
 
       connectBtn.addEventListener("click", async () => {
         connectBtn.disabled = true;
         statusEl.textContent = "connecting...";
+        setPill(connPill, connLabel, "false", "connecting");
         try {
           await client.connect({ ws_url: wsUrl });
           disconnectBtn.disabled = false;
         } catch (e) {
           log("connect failed:", e?.message ?? e);
+          setPill(connPill, connLabel, "error", "failed");
           connectBtn.disabled = false;
         }
       });

@@ -32,7 +32,10 @@
       "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/test_speech_tags.py tests/test_speech_director.py tests/test_groq_agent.py tests/test_characters.py -q 2>&1 | Select-Object -Last 30)",
       "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/test_live_conversation.py -q -k \"directed_speech or speech_direction_fails\" 2>&1 | Select-Object -Last 30)",
       "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q 2>&1 | Select-Object -Last 15)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(git -C \"C:\\\\Users\\\\Amirize\\\\Desktop\\\\codex-voiceai\" log --oneline -10)",
+      "Bash(git -C \"C:\\\\Users\\\\Amirize\\\\Desktop\\\\codex-voiceai\" diff --stat)",
+      "WebFetch(domain:www.twilio.com)"
     ]
   }
 }

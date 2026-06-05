@@ -61,6 +61,7 @@ let playbackTime = 0;
 let activeSources = [];
 let activeTextResponseId = null;
 let activeAudioResponseId = null;
+const PLAYBACK_JITTER_BUFFER_SECONDS = 0.08;
 let localBargeInState = { consecutiveSpeechFrames: 0, cooldownUntilMs: 0, playbackActive: false };
 const locallyInterruptedAudioResponseIds = new Set();
 let ambienceConfig = { enabled: true, scene: "room_line", volume: 0.035 };
@@ -722,7 +723,10 @@ function playPcmChunk(payload) {
     }
   };
 
-  playbackTime = Math.max(context.currentTime, playbackTime);
+  const nextStartFloor = activeSources.length === 0
+    ? context.currentTime + PLAYBACK_JITTER_BUFFER_SECONDS
+    : context.currentTime;
+  playbackTime = Math.max(nextStartFloor, playbackTime);
   source.start(playbackTime);
   playbackTime += audioBuffer.duration;
   activeSources.push(source);

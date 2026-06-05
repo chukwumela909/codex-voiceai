@@ -34,6 +34,7 @@ class CartesiaStreamingTTS:
         self.open_timeout_seconds = open_timeout_seconds
         self.connect_retries = max(0, connect_retries)
         self.retry_backoff_seconds = max(0.0, retry_backoff_seconds)
+        self._idle_ws = None
 
     async def stream_speech(self, transcript: str, *, context_id: str | None = None) -> AsyncIterator[dict]:
         context_id = context_id or f"ctx_{uuid4().hex}"
@@ -146,8 +147,55 @@ class CartesiaStreamingTTS:
             request["generation_config"] = {"speed": self.speed}
         return request
 
+    async def pre_warm(self) -> None:
+        if self._idle_ws is not None and not self._idle_ws.closed:
+            return
+        try:
+            manager = websockets.connect(
+                "wss://api.cartesia.ai/tts/websocket",
+                additional_headers={
+                    "X-API-Key": self.api_key,
+                    "Cartesia-Version": self.cartesia_version,
+                },
+                open_timeout=self.open_timeout_seconds,
+            )
+            ws = await manager.__aenter__()
+        except Exception:
+            return
+        if self._idle_ws is not None and not self._idle_ws.closed:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+            return
+        self._idle_ws = ws
+
+    async def close_idle_connection(self) -> None:
+        ws, self._idle_ws = self._idle_ws, None
+        if ws and not ws.closed:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
     @asynccontextmanager
     async def _connect_websocket(self) -> AsyncIterator[object]:
+        ws = self._idle_ws
+        if ws is not None and not ws.closed:
+            self._idle_ws = None
+            try:
+                yield ws
+            except BaseException:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+                asyncio.create_task(self.pre_warm())
+                raise
+            else:
+                self._idle_ws = ws
+            return
+
         attempts = self.connect_retries + 1
         for attempt in range(1, attempts + 1):
             manager = websockets.connect(
@@ -174,10 +222,11 @@ class CartesiaStreamingTTS:
                 yield websocket
             except BaseException as exc:
                 suppress = await manager.__aexit__(type(exc), exc, exc.__traceback__)
+                asyncio.create_task(self.pre_warm())
                 if not suppress:
                     raise
             else:
-                await manager.__aexit__(None, None, None)
+                self._idle_ws = websocket
             return
 
 

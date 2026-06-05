@@ -8,7 +8,11 @@ from uuid import uuid4
 
 from app.cartesia_tts import CartesiaStreamingTTS, generate_cartesia_context_id
 from app.config import is_uuid
-from app.conversation_context import agent_transcript_with_intent_inference
+from app.conversation_context import (
+    agent_transcript_with_context,
+    agent_transcript_with_intent_inference,
+)
+from app.memory import build_manager
 from app.deepgram import DeepgramStreamingTranscriber
 from app.events import event
 from app.exceptions import ClientConnectionClosed
@@ -26,6 +30,7 @@ from app.speech_director import SpeechDirectionConfig, direct_speech_for_cartesi
 
 SendEvent = Callable[[dict], Awaitable[None]]
 RECENT_CONTEXT_TURN_LIMIT = 8
+AGENT_CONTEXT_TURN_LIMIT = 20
 MOCK_TURN_SPEECH_BYTES_THRESHOLD = 24000
 MOCK_SPEECH_RMS_THRESHOLD = 0.01
 PROACTIVE_STARTUP_GREETING_INSTRUCTION = (
@@ -87,7 +92,13 @@ class MockConversationSession:
         self.proactive_failures = 0
         self.proactive_cooldown_until_ms: int | None = None
         self.failed_proactive_turn_ids: set[str] = set()
+        self.running_summary = ""
+        self._summarized_through = 0
+        self._summary_task: asyncio.Task | None = None
         self.closed = False
+
+    def _memory_enabled(self) -> bool:
+        return bool(getattr(self.settings, "memory_effective_enabled", False))
 
     async def configure_audio(self, payload: dict) -> None:
         self.audio_config = {
@@ -99,6 +110,8 @@ class MockConversationSession:
         self.audio_stream_active = True
         if self.settings.normalized_mode == "live":
             await self._start_live_transcriber()
+            if self._has_usable_cartesia_config():
+                self._ensure_synthesizer()
         await self.send_event(event("status.changed", self.session_id, {"state": "listening"}))
         await self.send_event(
             event(
@@ -174,6 +187,8 @@ class MockConversationSession:
         self.closed = True
         if self.transcriber:
             await self.transcriber.close()
+        if self.synthesizer:
+            await self.synthesizer.close_idle_connection()
         if self.pending_proactive_task and not self.pending_proactive_task.done():
             self.pending_proactive_task.cancel()
             try:
@@ -192,6 +207,13 @@ class MockConversationSession:
                 await self.current_task
             except asyncio.CancelledError:
                 pass
+        if self._summary_task and not self._summary_task.done():
+            self._summary_task.cancel()
+            try:
+                await self._summary_task
+            except asyncio.CancelledError:
+                pass
+        await self._distill_session_memory()
         self.current_task = None
         self.active_response_id = None
         self.active_response_started_at = None
@@ -998,6 +1020,7 @@ class MockConversationSession:
             open_timeout_seconds=getattr(self.settings, "cartesia_open_timeout_seconds", 8.0),
             connect_retries=getattr(self.settings, "cartesia_connect_retries", 1),
         )
+        asyncio.create_task(self.synthesizer.pre_warm())
 
     async def _direct_cartesia_text(self, text: str, *, metadata: dict | None = None) -> str:
         metadata = metadata or {}
@@ -1318,8 +1341,18 @@ class MockConversationSession:
     async def _live_user_agent_transcript(self, *, metadata: dict | None = None) -> list[dict[str, str]]:
         metadata = metadata or {}
         enabled = bool(getattr(self.settings, "intent_inference_enabled", True))
-        transcript = agent_transcript_with_intent_inference(self.transcript, enabled=enabled)
-        if enabled and transcript != self.transcript:
+        windowed = self.transcript[-AGENT_CONTEXT_TURN_LIMIT:]
+
+        self._maybe_refresh_running_summary()
+        memory_block, memories_used = await self._build_memory_block()
+
+        transcript = agent_transcript_with_context(
+            windowed,
+            memory_block=memory_block,
+            intent_enabled=enabled,
+        )
+        injected_intent = enabled and agent_transcript_with_intent_inference(windowed, enabled=enabled) != windowed
+        if injected_intent or memory_block:
             await self.send_event(
                 event(
                     "pipeline.stage",
@@ -1327,13 +1360,73 @@ class MockConversationSession:
                     {
                         "stage": "llm_context",
                         "provider": "groq",
-                        "intent_inference": True,
+                        "intent_inference": injected_intent,
+                        "memory_injected": bool(memory_block),
+                        "memories_used": memories_used,
                         "turns_sent": len(transcript),
                         **metadata,
                     },
                 )
             )
         return transcript
+
+    async def _build_memory_block(self) -> tuple[str, int]:
+        if not self._memory_enabled():
+            return "", 0
+        try:
+            manager = build_manager(self.settings)
+            query = self.active_user_text or self._last_user_text()
+            records = await manager.retrieve(query) if query else []
+            block = manager.build_memory_block(records, running_summary=self.running_summary)
+            return block, len(records)
+        except Exception:
+            # Memory must never break a turn — degrade silently to no memory.
+            return ("Earlier in this call: " + self.running_summary if self.running_summary else ""), 0
+
+    def _last_user_text(self) -> str:
+        for turn in reversed(self.transcript):
+            if turn.get("role") == "user" and turn.get("content", "").strip():
+                return turn["content"]
+        return ""
+
+    def _maybe_refresh_running_summary(self) -> None:
+        if not (self._memory_enabled() and getattr(self.settings, "memory_session_summary_enabled", True)):
+            return
+        overflow = len(self.transcript) - AGENT_CONTEXT_TURN_LIMIT
+        if overflow <= 0:
+            return
+        # Only the turns that have dropped out of the window need summarizing.
+        if (len(self.transcript) - self._summarized_through) < 2:
+            return
+        if self._summary_task and not self._summary_task.done():
+            return
+        older = list(self.transcript[:overflow])
+        through = len(self.transcript)
+        self._summary_task = asyncio.create_task(self._refresh_running_summary(older, through))
+
+    async def _refresh_running_summary(self, older_turns: list[dict[str, str]], through: int) -> None:
+        try:
+            manager = build_manager(self.settings)
+            summary = await manager.summarize(older_turns)
+            if summary:
+                self.running_summary = summary
+                self._summarized_through = through
+        except Exception:
+            pass
+
+    async def _distill_session_memory(self) -> None:
+        """At end of session, distill durable facts + a summary into long-term memory.
+
+        Runs after the live turn loop has stopped, so it never affects turn
+        latency, and is best-effort — a failure here must not break teardown.
+        """
+        if not self._memory_enabled() or not self.transcript:
+            return
+        try:
+            manager = build_manager(self.settings)
+            await manager.distill_transcript(list(self.transcript), source_session=self.session_id)
+        except Exception:
+            pass
 
     def _uses_default_live_agent_response(self) -> bool:
         return getattr(self._stream_live_agent_response, "__func__", None) is MockConversationSession._stream_live_agent_response

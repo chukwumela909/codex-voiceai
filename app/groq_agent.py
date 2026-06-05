@@ -26,6 +26,7 @@ class GroqStreamingAgent:
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
+            "max_tokens": 120,
             "stream": True,
         }
         headers = {
@@ -68,13 +69,15 @@ def pop_speakable_chunks(buffer: str, *, force: bool = False) -> tuple[list[str]
     chunks: list[str] = []
     cursor = 0
     punctuation = ".!?\n"
-    min_punctuated_chars = 18
-    max_unpunctuated_chars = 70
+    min_punctuated_chars = 24
+    max_unpunctuated_chars = 90
 
     in_tag, paired = _scan_tag_depth(buffer)
 
     for index, char in enumerate(buffer):
         if char in punctuation and index + 1 - cursor >= min_punctuated_chars:
+            if char == "." and index + 1 < len(buffer) and buffer[index + 1].isdigit():
+                continue
             if not _safe_split_after(in_tag, paired, index):
                 continue
             chunks.append(buffer[cursor : index + 1].strip() + " ")
@@ -90,7 +93,7 @@ def pop_speakable_chunks(buffer: str, *, force: bool = False) -> tuple[list[str]
         for offset in range(window):
             if remainder[offset] == " " and _safe_split_after(in_tag, paired, cursor + offset):
                 split_at = offset
-        if split_at > 32:
+        if split_at > 18:
             chunks.append(remainder[:split_at].strip() + " ")
             remainder = remainder[split_at:]
 

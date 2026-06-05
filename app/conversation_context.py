@@ -27,6 +27,25 @@ def agent_transcript_with_intent_inference(
     ]
 
 
+def agent_transcript_with_context(
+    transcript: list[dict[str, str]],
+    *,
+    memory_block: str = "",
+    intent_enabled: bool = True,
+) -> list[dict[str, str]]:
+    """Assemble the messages sent to the agent: an optional leading memory
+    system message, then the (optionally intent-inferred) transcript.
+
+    Composes the existing intent-inference transform so memory is just one more
+    system message at the same seam, rather than a second injection path.
+    """
+    base = agent_transcript_with_intent_inference(transcript, enabled=intent_enabled)
+    block = (memory_block or "").strip()
+    if block:
+        return [{"role": "system", "content": block}, *base]
+    return base
+
+
 def _copy_turn(turn: dict[str, str]) -> dict[str, str]:
     role = turn.get("role", "")
     content = turn.get("content", "")

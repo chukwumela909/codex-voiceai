@@ -56,6 +56,8 @@ One WebSocket connection = one conversation session. The server streams JSON eve
 - **`app/groq_agent.py`** — Groq LLM adapter; `pop_speakable_chunks()` splits streaming delta text into TTS-ready sentence fragments (≥24 chars on `.!?\n`, or every 90 chars at a word boundary)
 - **`app/deepgram.py`** — Deepgram WebSocket STT; emits on `is_final` and `speech_final` signals
 - **`app/cartesia_tts.py`** — Cartesia WebSocket TTS; returns base64-encoded PCM audio chunks with context IDs
+- **`app/preview.py`** — Stateless one-shot character preview (LLM→TTS) powering the Personality Studio's `POST /characters/preview`; composes the same adapters a live turn uses, mock-fallbacks without keys
+- **`app/memory/`** — Agent memory: `embedder.py` (swappable: OpenAI via httpx, deterministic mock), `store.py` (local file-backed numpy-free cosine vector store, atomic writes), `manager.py` (RAG retrieve / distill / summarize). Injects at the `conversation_context.py` seam alongside intent inference; distills on session close. Inspect/reset via `GET`/`DELETE /memory`. Single global person (no identity keying yet)
 
 ### Frontend
 
