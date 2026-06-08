@@ -4,7 +4,7 @@ import logging
 
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.characters import (
@@ -119,7 +119,13 @@ async def send_server_event(websocket: WebSocket, payload: dict) -> None:
 
 
 @app.get("/")
-async def index() -> FileResponse:
+async def index() -> RedirectResponse:
+    # Pipecat page is the default landing page; the classic UI lives at /classic.
+    return RedirectResponse(url="/pipecat")
+
+
+@app.get("/classic")
+async def classic_index() -> FileResponse:
     return FileResponse("frontend/index.html")
 
 

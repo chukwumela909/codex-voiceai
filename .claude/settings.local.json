@@ -35,7 +35,9 @@
       "Bash(git stash *)",
       "Bash(git -C \"C:\\\\Users\\\\Amirize\\\\Desktop\\\\codex-voiceai\" log --oneline -10)",
       "Bash(git -C \"C:\\\\Users\\\\Amirize\\\\Desktop\\\\codex-voiceai\" diff --stat)",
-      "WebFetch(domain:www.twilio.com)"
+      "WebFetch(domain:www.twilio.com)",
+      "Bash(xargs grep -l \"twilio\\\\|phone\\\\|inbound\\\\|outbound\" -i)",
+      "Bash(git log *)"
     ]
   }
 }

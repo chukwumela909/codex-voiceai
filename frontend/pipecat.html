@@ -42,6 +42,21 @@
       button:hover:not(:disabled) { background: #292524; border-color: #44403c; }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+      .linkbtn {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        transition: background 160ms ease, border-color 160ms ease;
+      }
+      .linkbtn:hover { background: #292524; border-color: #44403c; }
+
       .pills { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
       .pill {
         display: inline-flex; align-items: center; gap: 8px;
@@ -138,6 +153,8 @@
     <div class="controls">
       <button id="connect">Connect</button>
       <button id="disconnect" disabled>Disconnect</button>
+      <a class="linkbtn" href="/studio">Studio</a>
+      <a class="linkbtn" href="/classic">Classic UI</a>
     </div>
 
     <div class="pills">
