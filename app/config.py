@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     input_gain: float = Field(default=DEFAULT_INPUT_GAIN, alias="VOICE_AGENT_INPUT_GAIN")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.7, alias="GROQ_TEMPERATURE")
+    # Sliding-window cap on conversation turns sent to the LLM each turn. Bounds
+    # per-turn token cost so a long call doesn't keep re-sending the full
+    # transcript (which exhausts Groq's TPM budget and stalls replies). 0 = unbounded.
+    llm_context_max_turns: int = Field(default=12, ge=0, alias="VOICE_AGENT_LLM_CONTEXT_MAX_TURNS")
     cartesia_model: str = Field(default="sonic-3", alias="CARTESIA_MODEL")
     cartesia_speed: float = Field(default=1.2, alias="CARTESIA_SPEED")
     cartesia_voice_id: str | None = Field(default=None, alias="CARTESIA_VOICE_ID")

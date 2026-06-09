@@ -37,7 +37,15 @@
       "Bash(git -C \"C:\\\\Users\\\\Amirize\\\\Desktop\\\\codex-voiceai\" diff --stat)",
       "WebFetch(domain:www.twilio.com)",
       "Bash(xargs grep -l \"twilio\\\\|phone\\\\|inbound\\\\|outbound\" -i)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(python scripts/debug_groq_ttft.py)",
+      "Bash(./.venv/Scripts/python.exe -c \"import pipecat; print\\('pipecat', getattr\\(pipecat,'__version__','?'\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"from pipecat.processors.aggregators.llm_context import LLMContext; print\\([m for m in dir\\(LLMContext\\) if not m.startswith\\('__'\\)]\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_context_window.py -q)",
+      "Bash(./.venv/Scripts/python.exe -c \"import app.pipeline; print\\('pipeline imports OK'\\)\")",
+      "Bash(rm scripts/debug_groq_ttft.py)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_config.py -q)"
     ]
   }
 }

@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, LLMMessagesAppendFrame
+from pipecat.frames.frames import Frame, LLMContextFrame, LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -61,6 +61,57 @@ class UserIdleObserver(FrameProcessor):
 
 logger = logging.getLogger("voice_agent.pipecat")
 
+
+def window_context_messages(messages: list[dict], max_messages: int) -> list[dict]:
+    """Keep leading system message(s) + the most recent ``max_messages`` messages.
+
+    The LLM context grows unbounded otherwise — every turn re-sends the entire
+    transcript, so per-turn token cost climbs with the conversation and quickly
+    exhausts Groq's tokens-per-minute budget, stalling replies on long calls.
+    This caps the history while always preserving the leading system prompt.
+
+    ``max_messages <= 0`` disables windowing (unbounded). Returns the original
+    list object unchanged when no trimming is needed.
+    """
+    if max_messages <= 0 or len(messages) <= max_messages:
+        return messages
+
+    prefix_len = 0
+    while prefix_len < len(messages) and messages[prefix_len].get("role") == "system":
+        prefix_len += 1
+
+    rest = messages[prefix_len:]
+    if len(rest) <= max_messages:
+        return messages
+
+    return messages[:prefix_len] + rest[-max_messages:]
+
+
+class ContextWindowProcessor(FrameProcessor):
+    """Trims the shared LLM context to a sliding window before each LLM run.
+
+    Sits just before the LLM service. Every LLM run funnels a downstream
+    ``LLMContextFrame`` through here; we bound the shared context's message list
+    in place so the LLM (and the next turn's aggregation) stay within budget.
+    """
+
+    def __init__(self, context: LLMContext, max_turns: int, **kwargs):
+        super().__init__(**kwargs)
+        self._context = context
+        self._max_messages = max_turns * 2  # one user + one assistant per turn
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame) and direction == FrameDirection.DOWNSTREAM:
+            messages = self._context.get_messages()
+            windowed = window_context_messages(messages, self._max_messages)
+            if len(windowed) != len(messages):
+                self._context.set_messages(windowed)
+                logger.debug(
+                    "context windowed: %d -> %d messages", len(messages), len(windowed)
+                )
+        await self.push_frame(frame, direction)
+
 GROQ_OPENAI_BASE_URL = "https://api.groq.com/openai/v1"
 IDLE_NUDGE_INSTRUCTION = (
     "The caller has gone quiet. Offer one brief, warm check-in to let them know "
@@ -108,12 +159,17 @@ def build_session_task(transport: FastAPIWebsocketTransport, settings: Settings)
     idle_controller = UserIdleController(user_idle_timeout=idle_timeout_seconds)
     idle_observer = UserIdleObserver(idle_controller)
 
+    context_window = ContextWindowProcessor(
+        context, max_turns=getattr(settings, "llm_context_max_turns", 0)
+    )
+
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
             user_aggregator,
             idle_observer,
+            context_window,
             llm,
             tts,
             transport.output(),
