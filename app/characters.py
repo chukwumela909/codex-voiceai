@@ -13,6 +13,10 @@ from app.speech_tags import EMOTION_LABELS
 CHARACTERS_DIR = Path(__file__).parent / "characters"
 DEFAULT_CHARACTER_ID = "zara"
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,47}$")
+# Runtime-mutable pointer to the active character (the one phone/browser calls
+# use). Stored next to the characters so it shares their persistence, but named
+# so the `*.json` loader glob never picks it up.
+DEFAULT_POINTER_NAME = "_default_character"
 
 
 class Character(BaseModel):
@@ -153,6 +157,53 @@ def get_character(character_id: str | None, *, fallback: str = DEFAULT_CHARACTER
         name=fallback.title(),
         role="voice assistant",
     )
+
+
+def _pointer_path(directory: Path | None = None) -> Path:
+    return (directory or CHARACTERS_DIR) / DEFAULT_POINTER_NAME
+
+
+def get_persisted_default_id(directory: Path | None = None) -> str | None:
+    """Read the persisted default-character id, or None if unset/unreadable."""
+    try:
+        text = _pointer_path(directory).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return text or None
+
+
+def set_persisted_default_id(character_id: str, directory: Path | None = None) -> Path:
+    """Atomically persist the chosen default-character id."""
+    base = directory or CHARACTERS_DIR
+    base.mkdir(parents=True, exist_ok=True)
+    path = _pointer_path(base)
+    tmp = path.with_name(f"{DEFAULT_POINTER_NAME}.tmp")
+    tmp.write_text(character_id, encoding="utf-8")
+    tmp.replace(path)
+    return path
+
+
+def resolve_default_character_id(
+    env_default: str | None = None, directory: Path | None = None
+) -> str:
+    """Resolve which character is active, in precedence order.
+
+    persisted pointer -> env/config default -> built-in DEFAULT_CHARACTER_ID ->
+    first character on disk. Only ids that actually exist on disk are honored, so
+    a deleted character can never strand the phone with an invalid pointer.
+    """
+    characters = load_characters(directory)
+
+    persisted = get_persisted_default_id(directory)
+    if persisted and persisted in characters:
+        return persisted
+    if env_default and env_default in characters:
+        return env_default
+    if DEFAULT_CHARACTER_ID in characters:
+        return DEFAULT_CHARACTER_ID
+    if characters:
+        return next(iter(characters))
+    return env_default or DEFAULT_CHARACTER_ID
 
 
 def save_character(character: Character, directory: Path | None = None) -> Path:

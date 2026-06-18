@@ -1,9 +1,10 @@
-"""Cartesia Sonic 3 SSML tag registry and sanitizer.
+"""Inline control-tag registry and sanitizer.
 
-The model is allowed to emit a narrow set of inline control tags. Anything
-outside that set (unknown tag, unknown attribute, malformed structure,
-unbalanced paired tag) is stripped — the inner text survives so speech keeps
-playing.
+``sanitize`` strips any tag outside the caller-supplied allow-list (unknown tag,
+unknown attribute, malformed structure, unbalanced paired tag) while preserving
+the inner text so speech keeps playing. ElevenLabs has no tag support, so the
+TTS path passes an empty allow-list to strip everything; the ``ALLOWED_TAGS``
+registry below is kept as a reusable default for any caller that wants it.
 """
 from __future__ import annotations
 
@@ -151,7 +152,7 @@ def _render_tag(name: str, attrs: dict[str, str], *, void: bool) -> str:
 
 
 def _escape_plain(text: str) -> str:
-    # Cartesia treats input as plain text outside recognized tags, so stray
+    # TTS treats input as plain text outside recognized tags, so stray
     # <, >, & must pass through verbatim — XML-escaping them would make
-    # Sonic read out "ampersand l t semicolon".
+    # the model read out "ampersand l t semicolon".
     return text

@@ -42,6 +42,17 @@
       button:hover:not(:disabled) { background: #292524; border-color: #44403c; }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+      select {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      select:disabled { opacity: 0.45; cursor: not-allowed; }
+
       .linkbtn {
         font: inherit;
         padding: 0.5rem 1rem;
@@ -153,6 +164,9 @@
     <div class="controls">
       <button id="connect">Connect</button>
       <button id="disconnect" disabled>Disconnect</button>
+      <select id="characterSelect" title="Character" disabled>
+        <option value="">default character</option>
+      </select>
       <a class="linkbtn" href="/studio">Studio</a>
       <a class="linkbtn" href="/classic">Classic UI</a>
     </div>
@@ -210,6 +224,7 @@
       const transcriptLines = document.getElementById("transcriptLines");
       const transcriptEmpty = document.getElementById("transcriptEmpty");
       const transcriptPartial = document.getElementById("transcriptPartial");
+      const characterSelect = document.getElementById("characterSelect");
 
       // --- Log ---
       function log(...args) {
@@ -343,6 +358,29 @@
         rafId = requestAnimationFrame(renderLoop);
       }
 
+      // --- Characters ---
+      async function loadCharacters() {
+        try {
+          const res = await fetch("/characters");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const characters = data.characters || [];
+          if (!characters.length) return;
+          characterSelect.innerHTML = "";
+          for (const c of characters) {
+            const opt = document.createElement("option");
+            opt.value = c.id;
+            opt.textContent = c.name || c.id;
+            if (c.id === data.default) opt.selected = true;
+            characterSelect.appendChild(opt);
+          }
+          characterSelect.disabled = false;
+        } catch (e) {
+          log("characters load failed:", e?.message ?? e);
+        }
+      }
+      loadCharacters();
+
       // --- Pipecat client ---
       const wsScheme = location.protocol === "https:" ? "wss" : "ws";
       const wsUrl = `${wsScheme}://${location.host}/api/ws`;
@@ -355,6 +393,7 @@
           onConnected: () => {
             log("connected");
             setPill(connPill, connLabel, "true", "connected");
+            characterSelect.disabled = true;
           },
           onDisconnected: () => {
             log("disconnected");
@@ -365,6 +404,7 @@
             stopAnalyser();
             connectBtn.disabled = false;
             disconnectBtn.disabled = true;
+            characterSelect.disabled = characterSelect.options.length <= 1 && !characterSelect.value;
           },
           onBotConnected: () => log("bot connected"),
           onBotReady: () => {
@@ -468,7 +508,9 @@
         statusEl.textContent = "connecting...";
         setPill(connPill, connLabel, "false", "connecting");
         try {
-          await client.connect({ ws_url: wsUrl });
+          const character = characterSelect.value;
+          const url = character ? `${wsUrl}?character=${encodeURIComponent(character)}` : wsUrl;
+          await client.connect({ ws_url: url });
           disconnectBtn.disabled = false;
         } catch (e) {
           log("connect failed:", e?.message ?? e);

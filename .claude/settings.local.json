@@ -45,7 +45,20 @@
       "Bash(./.venv/Scripts/python.exe -m pytest tests/test_context_window.py -q)",
       "Bash(./.venv/Scripts/python.exe -c \"import app.pipeline; print\\('pipeline imports OK'\\)\")",
       "Bash(rm scripts/debug_groq_ttft.py)",
-      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_config.py -q)"
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_config.py -q)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_default_character.py tests/test_characters.py tests/test_context_window.py -q)",
+      "Bash(./.venv/Scripts/python.exe -m pytest tests/test_characters.py tests/test_default_character.py tests/test_context_window.py -q)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__get_page_text",
+      "mcp__Claude_in_Chrome__browser_batch",
+      "mcp__Claude_in_Chrome__computer",
+      "WebFetch(domain:api.agentcall.co)",
+      "PowerShell($r = Invoke-WebRequest -Uri \"https://api.agentcall.co/docs\" -UseBasicParsing; $r.Content)",
+      "PowerShell(\\(Invoke-WebRequest -Uri \"https://api.agentcall.co/docs/static/swagger-initializer.js\" -UseBasicParsing\\).Content)",
+      "Bash(python -c \"import pipecat, os; p=os.path.dirname\\(pipecat.__file__\\); print\\('pipecat', getattr\\(pipecat,'__version__','?'\\)\\); import glob; print\\('--- serializers ---'\\); print\\('\\\\n'.join\\(sorted\\(os.path.basename\\(f\\) for f in glob.glob\\(p+'/serializers/*.py'\\)\\)\\)\\); print\\('--- transports ---'\\); print\\('\\\\n'.join\\(sorted\\(os.path.basename\\(f\\) for f in glob.glob\\(p+'/transports/**/*.py', recursive=True\\)\\)\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import pipecat, os, glob; p=os.path.dirname\\(pipecat.__file__\\); print\\('pipecat', getattr\\(pipecat,'__version__','?'\\)\\); print\\('--- serializers ---'\\); print\\('\\\\n'.join\\(sorted\\(os.path.basename\\(f\\) for f in glob.glob\\(p+'/serializers/*.py'\\)\\)\\)\\); print\\('--- transports ---'\\); print\\('\\\\n'.join\\(sorted\\(os.path.basename\\(f\\) for f in glob.glob\\(p+'/transports/**/*.py', recursive=True\\)\\)\\)\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import pipecat, os, glob; p=os.path.dirname\\(pipecat.__file__\\); print\\('\\\\n'.join\\(sorted\\(d.replace\\(p,'pipecat'\\).replace\\(os.sep,'/'\\) for d in glob.glob\\(p+'/transports/*'\\) if os.path.isdir\\(d\\)\\)\\)\\)\")"
     ]
   }
 }

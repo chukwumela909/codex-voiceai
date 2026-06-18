@@ -8,9 +8,9 @@ from __future__ import annotations
 import base64
 import time
 
-from app.cartesia_tts import CartesiaStreamingTTS
 from app.characters import Character, build_system_prompt
-from app.config import Settings, is_uuid
+from app.config import Settings
+from app.elevenlabs_tts import ElevenLabsStreamingTTS
 from app.groq_agent import GroqStreamingAgent
 from app.mock_conversation import generate_mock_pcm
 
@@ -19,12 +19,11 @@ MOCK_MIN_SECONDS = 0.4
 MOCK_MAX_SECONDS = 2.5
 
 
-def _usable_cartesia(settings: Settings) -> bool:
+def _usable_elevenlabs(settings: Settings) -> bool:
     return bool(
         settings.normalized_mode == "live"
-        and settings.cartesia_api_key
-        and settings.cartesia_voice_id
-        and is_uuid(settings.cartesia_voice_id)
+        and settings.elevenlabs_api_key
+        and settings.elevenlabs_voice_id
     )
 
 
@@ -81,35 +80,38 @@ async def preview_character(character: Character, message: str, settings: Settin
         llm_provider = "mock"
     llm_ms = round((time.perf_counter() - llm_start) * 1000, 2)
 
-    # --- TTS: reuse the same Cartesia client as a live turn ---
+    # --- TTS: reuse the same ElevenLabs client as a live turn ---
     tts_provider = "mock"
     sample_rate = MOCK_SAMPLE_RATE
     audio_bytes = b""
     tts_start = time.perf_counter()
-    if _usable_cartesia(settings):
-        synthesizer = CartesiaStreamingTTS(
-            api_key=settings.cartesia_api_key,
-            model_id=settings.cartesia_model,
-            voice_id=settings.cartesia_voice_id,
-            sample_rate=settings.cartesia_sample_rate,
-            cartesia_version=settings.cartesia_version,
-            speed=getattr(settings, "cartesia_speed", None),
-            open_timeout_seconds=getattr(settings, "cartesia_open_timeout_seconds", 8.0),
-            connect_retries=getattr(settings, "cartesia_connect_retries", 1),
+    if _usable_elevenlabs(settings):
+        synthesizer = ElevenLabsStreamingTTS(
+            api_key=settings.elevenlabs_api_key,
+            model_id=settings.elevenlabs_model,
+            voice_id=settings.elevenlabs_voice_id,
+            sample_rate=settings.elevenlabs_sample_rate,
+            stability=settings.elevenlabs_stability,
+            similarity_boost=settings.elevenlabs_similarity_boost,
+            style=settings.elevenlabs_style,
+            use_speaker_boost=settings.elevenlabs_use_speaker_boost,
+            speed=getattr(settings, "elevenlabs_speed", None),
+            open_timeout_seconds=getattr(settings, "elevenlabs_open_timeout_seconds", 8.0),
+            connect_retries=getattr(settings, "elevenlabs_connect_retries", 1),
         )
         try:
             async for chunk in synthesizer.stream_speech(text):
                 if chunk["type"] == "error":
-                    warnings.append({"provider": "cartesia", "message": chunk["message"]})
+                    warnings.append({"provider": "elevenlabs", "message": chunk["message"]})
                     audio_bytes = b""
                     break
                 if chunk["type"] == "chunk" and chunk["audio"]:
                     audio_bytes += base64.b64decode(chunk["audio"])
             if audio_bytes:
-                tts_provider = "cartesia"
-                sample_rate = settings.cartesia_sample_rate
+                tts_provider = "elevenlabs"
+                sample_rate = settings.elevenlabs_sample_rate
         except Exception as exc:  # noqa: BLE001 — surface as warning, fall back to mock
-            warnings.append({"provider": "cartesia", "message": str(exc)})
+            warnings.append({"provider": "elevenlabs", "message": str(exc)})
             audio_bytes = b""
     if not audio_bytes:
         duration = max(MOCK_MIN_SECONDS, min(MOCK_MAX_SECONDS, len(text) / 25))

@@ -1,87 +1,40 @@
-from app.speech_director import SpeechDirectionConfig, direct_speech_for_cartesia
+from app.speech_director import strip_markup_for_tts, strip_markup_for_tts_detailed
 
 
-def test_director_leaves_plain_text_untouched():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    assert direct_speech_for_cartesia("Okay.", config) == "Okay."
+def test_plain_text_is_untouched():
+    assert strip_markup_for_tts("Okay.") == "Okay."
 
 
-def test_director_passes_through_allowed_break_tag():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    text = 'Well,<break time="180ms"/> let me think.'
-
-    assert direct_speech_for_cartesia(text, config) == text
+def test_break_tag_is_stripped():
+    assert strip_markup_for_tts('Well,<break time="180ms"/> let me think.') == "Well, let me think."
 
 
-def test_director_passes_through_allowed_emotion_and_spell():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
+def test_emotion_and_spell_tags_are_stripped_keeping_inner_text():
     text = '<emotion value="excited"/> The <spell>API</spell> is live!'
 
-    assert direct_speech_for_cartesia(text, config) == text
+    assert strip_markup_for_tts(text) == " The API is live!"
 
 
-def test_director_strips_unknown_tag_but_keeps_inner_text():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    text = "Hello <prosody rate=\"fast\">world</prosody> there."
-
-    assert direct_speech_for_cartesia(text, config) == "Hello world there."
+def test_unknown_tag_is_stripped_but_inner_text_survives():
+    assert strip_markup_for_tts('Hello <prosody rate="fast">world</prosody> there.') == "Hello world there."
 
 
-def test_director_strips_emotion_with_unknown_label():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    text = '<emotion value="grumpy"/> Hi.'
-
-    assert direct_speech_for_cartesia(text, config) == " Hi."
+def test_unbalanced_paired_tag_is_stripped():
+    assert strip_markup_for_tts("Read <spell>API and continue.") == "Read API and continue."
 
 
-def test_director_strips_break_with_malformed_time():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    text = 'Sure<break time="forever"/> let me think.'
-
-    assert direct_speech_for_cartesia(text, config) == "Sure let me think."
-
-
-def test_director_strips_unbalanced_paired_tag():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
-    text = "Read <spell>API and continue."
-
-    assert direct_speech_for_cartesia(text, config) == "Read API and continue."
-
-
-def test_director_passes_through_stray_xml_sensitive_chars():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True)
-
+def test_stray_xml_sensitive_chars_pass_through():
     text = "Use R&D API on x < 8000."
 
-    assert direct_speech_for_cartesia(text, config) == text
+    assert strip_markup_for_tts(text) == text
 
 
-def test_director_can_disable_ssml_handling():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=False)
-
-    text = '<emotion value="excited"/> Hi.'
-
-    assert direct_speech_for_cartesia(text, config) == text
+def test_empty_text_is_returned_as_is():
+    assert strip_markup_for_tts("") == ""
 
 
-def test_director_drops_emotion_tag_when_emotion_disabled():
-    config = SpeechDirectionConfig(enabled=True, ssml_enabled=True, emotion_tags_enabled=False)
+def test_detailed_reports_stripped_count():
+    result = strip_markup_for_tts_detailed('<emotion value="excited"/> Hi.')
 
-    text = '<emotion value="excited"/> Hi.'
-
-    assert direct_speech_for_cartesia(text, config) == " Hi."
-
-
-def test_director_can_be_disabled_entirely():
-    config = SpeechDirectionConfig(enabled=False, ssml_enabled=True)
-
-    text = '<emotion value="excited"/> Hi.'
-
-    assert direct_speech_for_cartesia(text, config) == text
+    assert result.text == " Hi."
+    assert result.stripped == 1

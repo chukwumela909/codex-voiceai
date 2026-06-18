@@ -25,7 +25,8 @@ def test_zara_character_loads_from_disk():
     chars = load_characters()
     assert "zara" in chars
     zara = chars["zara"]
-    assert zara.name == "Zara"
+    # name is user-editable via the Studio; assert it is set, not a fixed value.
+    assert zara.name
     assert "warm" in zara.tone
     assert any("as an AI" in p for p in zara.forbidden_phrases)
 
@@ -33,7 +34,7 @@ def test_zara_character_loads_from_disk():
 def test_build_system_prompt_includes_key_contract_pieces():
     zara = load_characters()["zara"]
     prompt = build_system_prompt(zara)
-    assert "You are Zara." in prompt
+    assert f"You are {zara.name}." in prompt
     assert "stay in character" in prompt
     assert "Do not claim to be human" in prompt
     for phrase in zara.forbidden_phrases:
@@ -187,7 +188,7 @@ def test_preview_warns_on_missing_live_keys(monkeypatch: pytest.MonkeyPatch):
     import app.main as main_mod
     from app.config import Settings
 
-    for key in ("GROQ_API_KEY", "DEEPGRAM_API_KEY", "CARTESIA_API_KEY", "CARTESIA_VOICE_ID"):
+    for key in ("GROQ_API_KEY", "DEEPGRAM_API_KEY", "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("VOICE_AGENT_MODE", "live")
     monkeypatch.setattr(main_mod, "settings", Settings(_env_file=None))

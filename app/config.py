@@ -1,14 +1,9 @@
 from functools import lru_cache
-import re
-from uuid import UUID
 
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-UUID_PREFIX_PATTERN = re.compile(
-    r"^\s*['\"]?([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
-)
 MOCK_PROACTIVE_SILENCE_TIMEOUT_MS = 5000
 LIVE_PROACTIVE_SILENCE_TIMEOUT_MS = 30000
 MOCK_PROACTIVE_REPEAT_COOLDOWN_MS = 8000
@@ -21,31 +16,6 @@ DEFAULT_DEEPGRAM_UTTERANCE_END_MS = MIN_DEEPGRAM_UTTERANCE_END_MS
 DEFAULT_PARTIAL_IDLE_FINALIZE_MS = 500
 DEFAULT_AMBIENCE_VOLUME = 0.035
 DEFAULT_INPUT_GAIN = 2.0
-
-
-def normalize_leading_uuid(value: object) -> str | None:
-    if value is None:
-        return None
-
-    text = str(value).strip().strip("'\"")
-    if not text:
-        return None
-
-    match = UUID_PREFIX_PATTERN.match(text)
-    if not match:
-        return text
-
-    return str(UUID(match.group(1)))
-
-
-def is_uuid(value: str | None) -> bool:
-    if not value:
-        return False
-    try:
-        UUID(value)
-    except ValueError:
-        return False
-    return True
 
 
 class Settings(BaseSettings):
@@ -63,7 +33,7 @@ class Settings(BaseSettings):
 
     deepgram_api_key: str | None = Field(default=None, alias="DEEPGRAM_API_KEY")
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
-    cartesia_api_key: str | None = Field(default=None, alias="CARTESIA_API_KEY")
+    elevenlabs_api_key: str | None = Field(default=None, alias="ELEVENLABS_API_KEY")
 
     deepgram_model: str = Field(default="nova-3", alias="DEEPGRAM_MODEL")
     deepgram_endpointing_ms: int = Field(default=DEFAULT_DEEPGRAM_ENDPOINTING_MS, alias="DEEPGRAM_ENDPOINTING_MS")
@@ -73,19 +43,39 @@ class Settings(BaseSettings):
         alias="VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS",
     )
     input_gain: float = Field(default=DEFAULT_INPUT_GAIN, alias="VOICE_AGENT_INPUT_GAIN")
+    # Pipecat turn-taking. VAD gates when a user turn can start/stop; smart turn
+    # is a local model that distinguishes a finished thought from a mid-sentence
+    # pause, so the bot neither jumps in early nor pads every turn with silence.
+    vad_confidence: float = Field(default=0.7, ge=0.0, le=1.0, alias="VOICE_AGENT_VAD_CONFIDENCE")
+    vad_start_secs: float = Field(default=0.2, gt=0, alias="VOICE_AGENT_VAD_START_SECS")
+    vad_stop_secs: float = Field(default=0.2, gt=0, alias="VOICE_AGENT_VAD_STOP_SECS")
+    vad_min_volume: float = Field(default=0.6, ge=0.0, le=1.0, alias="VOICE_AGENT_VAD_MIN_VOLUME")
+    smart_turn_enabled: bool = Field(default=True, alias="VOICE_AGENT_SMART_TURN_ENABLED")
+    smart_turn_stop_secs: float = Field(default=3.0, gt=0, alias="VOICE_AGENT_SMART_TURN_STOP_SECS")
+    speech_timeout_stop_secs: float = Field(
+        default=0.8, gt=0, alias="VOICE_AGENT_SPEECH_TIMEOUT_STOP_SECS"
+    )
+    # Words required in a transcript before barge-in interrupts the bot, so a
+    # cough or background noise can't cut it off. 0 = interrupt on any speech.
+    interruption_min_words: int = Field(default=2, ge=0, alias="VOICE_AGENT_INTERRUPT_MIN_WORDS")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.7, alias="GROQ_TEMPERATURE")
+    # Caps reply length to voice-appropriate size. 0 = no cap.
+    groq_max_tokens: int = Field(default=200, ge=0, alias="GROQ_MAX_TOKENS")
     # Sliding-window cap on conversation turns sent to the LLM each turn. Bounds
     # per-turn token cost so a long call doesn't keep re-sending the full
     # transcript (which exhausts Groq's TPM budget and stalls replies). 0 = unbounded.
     llm_context_max_turns: int = Field(default=12, ge=0, alias="VOICE_AGENT_LLM_CONTEXT_MAX_TURNS")
-    cartesia_model: str = Field(default="sonic-3", alias="CARTESIA_MODEL")
-    cartesia_speed: float = Field(default=1.2, alias="CARTESIA_SPEED")
-    cartesia_voice_id: str | None = Field(default=None, alias="CARTESIA_VOICE_ID")
-    cartesia_sample_rate: int = Field(default=16000, alias="CARTESIA_SAMPLE_RATE")
-    cartesia_version: str = Field(default="2026-03-01", alias="CARTESIA_VERSION")
-    cartesia_open_timeout_seconds: float = Field(default=8.0, gt=0, alias="CARTESIA_OPEN_TIMEOUT_SECONDS")
-    cartesia_connect_retries: int = Field(default=1, ge=0, alias="CARTESIA_CONNECT_RETRIES")
+    elevenlabs_model: str = Field(default="eleven_flash_v2_5", alias="ELEVENLABS_MODEL")
+    elevenlabs_speed: float = Field(default=1.0, alias="ELEVENLABS_SPEED")
+    elevenlabs_voice_id: str | None = Field(default=None, alias="ELEVENLABS_VOICE_ID")
+    elevenlabs_sample_rate: int = Field(default=16000, alias="ELEVENLABS_SAMPLE_RATE")
+    elevenlabs_stability: float = Field(default=0.5, ge=0.0, le=1.0, alias="ELEVENLABS_STABILITY")
+    elevenlabs_similarity_boost: float = Field(default=0.8, ge=0.0, le=1.0, alias="ELEVENLABS_SIMILARITY_BOOST")
+    elevenlabs_style: float = Field(default=0.0, ge=0.0, le=1.0, alias="ELEVENLABS_STYLE")
+    elevenlabs_use_speaker_boost: bool = Field(default=False, alias="ELEVENLABS_USE_SPEAKER_BOOST")
+    elevenlabs_open_timeout_seconds: float = Field(default=8.0, gt=0, alias="ELEVENLABS_OPEN_TIMEOUT_SECONDS")
+    elevenlabs_connect_retries: int = Field(default=1, ge=0, alias="ELEVENLABS_CONNECT_RETRIES")
     twilio_account_sid: str | None = Field(default=None, alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str | None = Field(default=None, alias="TWILIO_AUTH_TOKEN")
     public_host: str | None = Field(default=None, alias="PUBLIC_HOST")
@@ -99,15 +89,6 @@ class Settings(BaseSettings):
     )
     default_character_id: str = Field(default="zara", alias="VOICE_AGENT_DEFAULT_CHARACTER")
     intent_inference_enabled: bool = Field(default=True, alias="VOICE_AGENT_INTENT_INFERENCE_ENABLED")
-    cartesia_speech_director_enabled: bool = Field(
-        default=True,
-        alias="VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED",
-    )
-    cartesia_ssml_enabled: bool = Field(default=True, alias="VOICE_AGENT_CARTESIA_SSML_ENABLED")
-    cartesia_emotion_tags_enabled: bool = Field(
-        default=False,
-        alias="VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED",
-    )
     ambience_enabled: bool = Field(default=True, alias="VOICE_AGENT_AMBIENCE_ENABLED")
     ambience_scene: str = Field(default="room_line", alias="VOICE_AGENT_AMBIENCE_SCENE")
     ambience_volume: float = Field(default=DEFAULT_AMBIENCE_VOLUME, alias="VOICE_AGENT_AMBIENCE_VOLUME")
@@ -137,16 +118,19 @@ class Settings(BaseSettings):
         alias="VOICE_AGENT_MEMORY_SESSION_SUMMARY_ENABLED",
     )
 
-    @field_validator("cartesia_voice_id", mode="before")
+    @field_validator("elevenlabs_voice_id", mode="before")
     @classmethod
-    def normalize_cartesia_voice_id(cls, value: object) -> str | None:
-        return normalize_leading_uuid(value)
+    def normalize_elevenlabs_voice_id(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip().strip("'\"")
+        return text or None
 
-    @field_validator("cartesia_speed")
+    @field_validator("elevenlabs_speed")
     @classmethod
-    def validate_cartesia_speed(cls, value: float) -> float:
-        if not 0.6 <= value <= 1.5:
-            raise ValueError("CARTESIA_SPEED must be between 0.6 and 1.5")
+    def validate_elevenlabs_speed(cls, value: float) -> float:
+        if not 0.7 <= value <= 1.2:
+            raise ValueError("ELEVENLABS_SPEED must be between 0.7 and 1.2")
         return value
 
     @field_validator("partial_idle_finalize_ms")
@@ -258,17 +242,16 @@ class Settings(BaseSettings):
             missing.append("DEEPGRAM_API_KEY")
         if not self.groq_api_key:
             missing.append("GROQ_API_KEY")
-        if not self.cartesia_api_key:
-            missing.append("CARTESIA_API_KEY")
-        if not self.cartesia_voice_id:
-            missing.append("CARTESIA_VOICE_ID")
+        if not self.elevenlabs_api_key:
+            missing.append("ELEVENLABS_API_KEY")
+        if not self.elevenlabs_voice_id:
+            missing.append("ELEVENLABS_VOICE_ID")
         return missing
 
     def invalid_live_keys(self) -> list[str]:
-        invalid: list[str] = []
-        if self.cartesia_voice_id and not is_uuid(self.cartesia_voice_id):
-            invalid.append("CARTESIA_VOICE_ID")
-        return invalid
+        # ElevenLabs voice ids are opaque strings (not UUIDs), so there is no
+        # format to validate here. Kept for the health-report contract.
+        return []
 
     def public_config_status(self) -> dict:
         missing = self.missing_live_keys() if self.normalized_mode == "live" else []
@@ -290,7 +273,7 @@ class Settings(BaseSettings):
             "providers": {
                 "stt": "deepgram",
                 "llm": "groq",
-                "tts": "cartesia",
+                "tts": "elevenlabs",
             },
             "audio": {
                 "input_gain": self.input_gain,
@@ -310,15 +293,19 @@ class Settings(BaseSettings):
                 "top_k": self.memory_top_k,
                 "session_summary_enabled": self.memory_session_summary_enabled,
             },
-            "cartesia": {
+            "elevenlabs": {
+                "model": self.elevenlabs_model,
+                "sample_rate": self.elevenlabs_sample_rate,
                 "connection": {
-                    "open_timeout_seconds": self.cartesia_open_timeout_seconds,
-                    "connect_retries": self.cartesia_connect_retries,
+                    "open_timeout_seconds": self.elevenlabs_open_timeout_seconds,
+                    "connect_retries": self.elevenlabs_connect_retries,
                 },
-                "speech_direction": {
-                    "enabled": self.cartesia_speech_director_enabled,
-                    "ssml_enabled": self.cartesia_ssml_enabled,
-                    "emotion_tags_enabled": self.cartesia_emotion_tags_enabled,
+                "voice_settings": {
+                    "stability": self.elevenlabs_stability,
+                    "similarity_boost": self.elevenlabs_similarity_boost,
+                    "style": self.elevenlabs_style,
+                    "use_speaker_boost": self.elevenlabs_use_speaker_boost,
+                    "speed": self.elevenlabs_speed,
                 },
             },
             "ambience": {
@@ -330,6 +317,18 @@ class Settings(BaseSettings):
                 "deepgram_endpointing_ms": self.deepgram_endpointing_ms,
                 "deepgram_utterance_end_ms": self.deepgram_utterance_end_ms,
                 "partial_idle_finalize_ms": self.partial_idle_finalize_ms,
+                "vad": {
+                    "confidence": self.vad_confidence,
+                    "start_secs": self.vad_start_secs,
+                    "stop_secs": self.vad_stop_secs,
+                    "min_volume": self.vad_min_volume,
+                },
+                "smart_turn": {
+                    "enabled": self.smart_turn_enabled,
+                    "stop_secs": self.smart_turn_stop_secs,
+                },
+                "speech_timeout_stop_secs": self.speech_timeout_stop_secs,
+                "interruption_min_words": self.interruption_min_words,
             },
             "proactive": {
                 "configured": self.normalized_proactive_enabled,

@@ -12,7 +12,9 @@ from app.characters import (
     DEFAULT_CHARACTER_ID,
     SLUG_PATTERN,
     load_characters,
+    resolve_default_character_id,
     save_character,
+    set_persisted_default_id,
 )
 from app.config import get_settings
 from app.events import CLIENT_EVENT_TYPES, PLANNED_EVENT_TYPES, SERVER_EVENT_TYPES, event, new_session_id
@@ -148,12 +150,13 @@ async def pipecat_ws(websocket: WebSocket) -> None:
     """
     await websocket.accept()
     session_id = new_session_id()
+    requested_character = websocket.query_params.get("character")
     log_info("pipecat ws client connected", session_id=session_id)
 
     from app.pipeline import run_pipecat_session
 
     try:
-        await run_pipecat_session(websocket, settings)
+        await run_pipecat_session(websocket, settings, character_id=requested_character)
     except WebSocketDisconnect:
         log_info("pipecat ws client disconnected", session_id=session_id)
     except Exception:
@@ -222,7 +225,9 @@ async def health() -> dict:
 
 
 def _default_character_id() -> str:
-    return getattr(settings, "default_character_id", DEFAULT_CHARACTER_ID)
+    return resolve_default_character_id(
+        env_default=getattr(settings, "default_character_id", DEFAULT_CHARACTER_ID)
+    )
 
 
 @app.get("/characters")
@@ -245,6 +250,20 @@ def _validate_character_payload(character_id: str, payload: dict) -> Character:
         return Character.model_validate(data)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+
+@app.put("/characters/default")
+async def set_default_character_endpoint(payload: dict) -> dict:
+    """Persist which character is active. Takes effect on the next call/session.
+
+    Declared before `/characters/{character_id}` so the literal `default` path is
+    not captured as a character id by the dynamic route.
+    """
+    character_id = str(payload.get("id", "") or "").strip().lower()
+    if character_id not in load_characters():
+        raise HTTPException(status_code=404, detail="Unknown character id.")
+    set_persisted_default_id(character_id)
+    return {"default": character_id}
 
 
 @app.put("/characters/{character_id}")

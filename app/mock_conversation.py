@@ -6,8 +6,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
-from app.cartesia_tts import CartesiaStreamingTTS, generate_cartesia_context_id
-from app.config import is_uuid
+from app.elevenlabs_tts import ElevenLabsStreamingTTS, generate_context_id
 from app.conversation_context import (
     agent_transcript_with_context,
     agent_transcript_with_intent_inference,
@@ -26,7 +25,7 @@ from app.proactive import (
     ProactivePolicy,
     ProactivePolicyConfig,
 )
-from app.speech_director import SpeechDirectionConfig, direct_speech_for_cartesia_detailed
+from app.speech_director import strip_markup_for_tts_detailed
 
 SendEvent = Callable[[dict], Awaitable[None]]
 RECENT_CONTEXT_TURN_LIMIT = 8
@@ -62,7 +61,7 @@ class MockConversationSession:
         self.transcriber: DeepgramStreamingTranscriber | None = None
         self.agent: GroqStreamingAgent | None = None
         self.character: Character = get_character(getattr(settings, "default_character_id", None))
-        self.synthesizer: CartesiaStreamingTTS | None = None
+        self.synthesizer: ElevenLabsStreamingTTS | None = None
         self.proactive_config = ProactivePolicyConfig.from_settings(settings)
         self.proactive_policy = ProactivePolicy(self.proactive_config)
         self.transcript: list[dict[str, str]] = []
@@ -110,7 +109,7 @@ class MockConversationSession:
         self.audio_stream_active = True
         if self.settings.normalized_mode == "live":
             await self._start_live_transcriber()
-            if self._has_usable_cartesia_config():
+            if self._has_usable_elevenlabs_config():
                 self._ensure_synthesizer()
         await self.send_event(event("status.changed", self.session_id, {"state": "listening"}))
         await self.send_event(
@@ -722,7 +721,7 @@ class MockConversationSession:
         if (
             self.settings.normalized_mode == "live"
             and self.settings.groq_api_key
-            and self._has_usable_cartesia_config()
+            and self._has_usable_elevenlabs_config()
             and self._uses_default_live_agent_response()
         ):
             message = await self._stream_live_agent_response_with_streaming_speech(response_id, final_detected_at)
@@ -952,44 +951,25 @@ class MockConversationSession:
                 self.session_id,
                 {
                     "stage": "tts_streaming",
-                    "provider": "cartesia" if self.settings.normalized_mode == "live" else "mock",
+                    "provider": "elevenlabs" if self.settings.normalized_mode == "live" else "mock",
                     **metadata,
                 },
             )
         )
-        if self._has_usable_cartesia_config():
-            cartesia_succeeded = await self._stream_cartesia_speech(
+        if self._has_usable_elevenlabs_config():
+            elevenlabs_succeeded = await self._stream_elevenlabs_speech(
                 response_id,
                 message,
                 final_detected_at,
                 metadata=metadata,
             )
-            if cartesia_succeeded:
+            if elevenlabs_succeeded:
                 return
 
             await self._stream_tts_fallback(
                 response_id,
                 final_detected_at,
-                fallback_from="cartesia",
-                metadata=metadata,
-            )
-            return
-
-        if (
-            self.settings.normalized_mode == "live"
-            and self.settings.cartesia_api_key
-            and self.settings.cartesia_voice_id
-            and not is_uuid(self.settings.cartesia_voice_id)
-        ):
-            await self.send_provider_error(
-                "cartesia",
-                "CARTESIA_VOICE_ID must be a UUID. Falling back to mock audio.",
-                metadata=metadata,
-            )
-            await self._stream_tts_fallback(
-                response_id,
-                final_detected_at,
-                fallback_from="cartesia",
+                fallback_from="elevenlabs",
                 metadata=metadata,
             )
             return
@@ -999,40 +979,37 @@ class MockConversationSession:
             event("pipeline.stage", self.session_id, {"stage": "tts_done", "provider": "mock", **metadata})
         )
 
-    def _has_usable_cartesia_config(self) -> bool:
+    def _has_usable_elevenlabs_config(self) -> bool:
         return bool(
             self.settings.normalized_mode == "live"
-            and self.settings.cartesia_api_key
-            and self.settings.cartesia_voice_id
-            and is_uuid(self.settings.cartesia_voice_id)
+            and self.settings.elevenlabs_api_key
+            and self.settings.elevenlabs_voice_id
         )
 
     def _ensure_synthesizer(self) -> None:
         if self.synthesizer is not None:
             return
-        self.synthesizer = CartesiaStreamingTTS(
-            api_key=self.settings.cartesia_api_key,
-            model_id=self.settings.cartesia_model,
-            voice_id=self.settings.cartesia_voice_id,
-            sample_rate=self.settings.cartesia_sample_rate,
-            cartesia_version=self.settings.cartesia_version,
-            speed=getattr(self.settings, "cartesia_speed", None),
-            open_timeout_seconds=getattr(self.settings, "cartesia_open_timeout_seconds", 8.0),
-            connect_retries=getattr(self.settings, "cartesia_connect_retries", 1),
+        self.synthesizer = ElevenLabsStreamingTTS(
+            api_key=self.settings.elevenlabs_api_key,
+            model_id=self.settings.elevenlabs_model,
+            voice_id=self.settings.elevenlabs_voice_id,
+            sample_rate=self.settings.elevenlabs_sample_rate,
+            stability=self.settings.elevenlabs_stability,
+            similarity_boost=self.settings.elevenlabs_similarity_boost,
+            style=self.settings.elevenlabs_style,
+            use_speaker_boost=self.settings.elevenlabs_use_speaker_boost,
+            speed=getattr(self.settings, "elevenlabs_speed", None),
+            open_timeout_seconds=getattr(self.settings, "elevenlabs_open_timeout_seconds", 8.0),
+            connect_retries=getattr(self.settings, "elevenlabs_connect_retries", 1),
         )
         asyncio.create_task(self.synthesizer.pre_warm())
 
-    async def _direct_cartesia_text(self, text: str, *, metadata: dict | None = None) -> str:
+    async def _strip_markup(self, text: str, *, metadata: dict | None = None) -> str:
         metadata = metadata or {}
-        config = SpeechDirectionConfig(
-            enabled=bool(getattr(self.settings, "cartesia_speech_director_enabled", True)),
-            ssml_enabled=bool(getattr(self.settings, "cartesia_ssml_enabled", True)),
-            emotion_tags_enabled=bool(getattr(self.settings, "cartesia_emotion_tags_enabled", True)),
-        )
         try:
-            result = direct_speech_for_cartesia_detailed(text, config)
+            result = strip_markup_for_tts_detailed(text)
         except Exception as exc:
-            await self.send_provider_error("cartesia", f"Speech direction failed: {exc}", metadata=metadata)
+            await self.send_provider_error("elevenlabs", f"Markup stripping failed: {exc}", metadata=metadata)
             return text
 
         if result.text != text or result.stripped:
@@ -1041,8 +1018,8 @@ class MockConversationSession:
                     "pipeline.stage",
                     self.session_id,
                     {
-                        "stage": "tts_speech_direction",
-                        "provider": "cartesia",
+                        "stage": "tts_markup_stripped",
+                        "provider": "elevenlabs",
                         "directed": True,
                         "tags_stripped": result.stripped,
                         **metadata,
@@ -1072,7 +1049,7 @@ class MockConversationSession:
             event("pipeline.stage", self.session_id, {"stage": "tts_done", "provider": "mock", **metadata})
         )
 
-    async def _stream_cartesia_speech(
+    async def _stream_elevenlabs_speech(
         self,
         response_id: str,
         message: str,
@@ -1087,13 +1064,13 @@ class MockConversationSession:
         audio_chunks = 0
         audio_bytes = 0
         try:
-            directed_message = await self._direct_cartesia_text(message, metadata=metadata)
+            directed_message = await self._strip_markup(message, metadata=metadata)
             async for chunk in self.synthesizer.stream_speech(
                 directed_message,
-                context_id=generate_cartesia_context_id(response_id),
+                context_id=generate_context_id(response_id),
             ):
                 if chunk["type"] == "error":
-                    await self.send_provider_error("cartesia", chunk["message"], metadata=metadata)
+                    await self.send_provider_error("elevenlabs", chunk["message"], metadata=metadata)
                     return False
                 if chunk["type"] != "chunk" or not chunk["audio"]:
                     continue
@@ -1114,7 +1091,7 @@ class MockConversationSession:
                             "latency.metric",
                             self.session_id,
                             {
-                                "name": "cartesia_time_to_first_audio_ms",
+                                "name": "elevenlabs_time_to_first_audio_ms",
                                 "response_id": response_id,
                                 "value_ms": round((time.perf_counter() - final_detected_at) * 1000, 2),
                             },
@@ -1128,11 +1105,11 @@ class MockConversationSession:
                         {
                             "response_id": response_id,
                             "encoding": "pcm_s16le",
-                            "sample_rate": self.settings.cartesia_sample_rate,
+                            "sample_rate": self.settings.elevenlabs_sample_rate,
                             "channels": 1,
                             "is_final": False,
                             "audio": chunk["audio"],
-                            "provider": "cartesia",
+                            "provider": "elevenlabs",
                             "chunk_index": audio_chunks,
                             "chunk_bytes": len(decoded_audio),
                             "rms": calculate_pcm_level(decoded_audio)["rms"],
@@ -1147,7 +1124,7 @@ class MockConversationSession:
                     self.session_id,
                     {
                         "stage": "tts_done",
-                        "provider": "cartesia",
+                        "provider": "elevenlabs",
                         "audio_chunks": audio_chunks,
                         "audio_bytes": audio_bytes,
                         **metadata,
@@ -1156,8 +1133,8 @@ class MockConversationSession:
             )
             if audio_chunks == 0:
                 await self.send_provider_error(
-                    "cartesia",
-                    "Cartesia completed without sending audio chunks. Check CARTESIA_API_KEY, CARTESIA_VOICE_ID, model access, and account permissions.",
+                    "elevenlabs",
+                    "ElevenLabs completed without sending audio chunks. Check ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, model access, and account permissions.",
                     metadata=metadata,
                 )
                 return False
@@ -1168,10 +1145,10 @@ class MockConversationSession:
         except Exception as exc:
             if self.closed:
                 return True
-            await self.send_provider_error("cartesia", str(exc), metadata=metadata)
+            await self.send_provider_error("elevenlabs", str(exc), metadata=metadata)
             return False
 
-    async def _stream_cartesia_speech_chunks(
+    async def _stream_elevenlabs_speech_chunks(
         self,
         response_id: str,
         chunks: AsyncIterator[str],
@@ -1186,7 +1163,7 @@ class MockConversationSession:
             event(
                 "pipeline.stage",
                 self.session_id,
-                {"stage": "tts_streaming", "provider": "cartesia", "streaming_input": True, **metadata},
+                {"stage": "tts_streaming", "provider": "elevenlabs", "streaming_input": True, **metadata},
             )
         )
 
@@ -1196,14 +1173,14 @@ class MockConversationSession:
         try:
             async def directed_chunks() -> AsyncIterator[str]:
                 async for text in chunks:
-                    yield await self._direct_cartesia_text(text, metadata=metadata)
+                    yield await self._strip_markup(text, metadata=metadata)
 
             async for chunk in self.synthesizer.stream_speech_chunks(
                 directed_chunks(),
-                context_id=generate_cartesia_context_id(response_id),
+                context_id=generate_context_id(response_id),
             ):
                 if chunk["type"] == "error":
-                    await self.send_provider_error("cartesia", chunk["message"], metadata=metadata)
+                    await self.send_provider_error("elevenlabs", chunk["message"], metadata=metadata)
                     return False
                 if chunk["type"] != "chunk" or not chunk["audio"]:
                     continue
@@ -1224,7 +1201,7 @@ class MockConversationSession:
                             "latency.metric",
                             self.session_id,
                             {
-                                "name": "cartesia_time_to_first_audio_ms",
+                                "name": "elevenlabs_time_to_first_audio_ms",
                                 "response_id": response_id,
                                 "value_ms": round((time.perf_counter() - final_detected_at) * 1000, 2),
                             },
@@ -1239,11 +1216,11 @@ class MockConversationSession:
                         {
                             "response_id": response_id,
                             "encoding": "pcm_s16le",
-                            "sample_rate": self.settings.cartesia_sample_rate,
+                            "sample_rate": self.settings.elevenlabs_sample_rate,
                             "channels": 1,
                             "is_final": False,
                             "audio": chunk["audio"],
-                            "provider": "cartesia",
+                            "provider": "elevenlabs",
                             "chunk_index": audio_chunks,
                             "chunk_bytes": len(decoded_audio),
                             "rms": level["rms"],
@@ -1258,7 +1235,7 @@ class MockConversationSession:
                     self.session_id,
                     {
                         "stage": "tts_done",
-                        "provider": "cartesia",
+                        "provider": "elevenlabs",
                         "streaming_input": True,
                         "audio_chunks": audio_chunks,
                         "audio_bytes": audio_bytes,
@@ -1268,8 +1245,8 @@ class MockConversationSession:
             )
             if audio_chunks == 0:
                 await self.send_provider_error(
-                    "cartesia",
-                    "Cartesia completed without sending audio chunks. Check CARTESIA_API_KEY, CARTESIA_VOICE_ID, model access, and account permissions.",
+                    "elevenlabs",
+                    "ElevenLabs completed without sending audio chunks. Check ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, model access, and account permissions.",
                     metadata=metadata,
                 )
                 return False
@@ -1280,7 +1257,7 @@ class MockConversationSession:
         except Exception as exc:
             if self.closed:
                 return True
-            await self.send_provider_error("cartesia", str(exc), metadata=metadata)
+            await self.send_provider_error("elevenlabs", str(exc), metadata=metadata)
             return False
 
     async def _stream_mock_speech(
@@ -1504,13 +1481,13 @@ class MockConversationSession:
 
         drain_task = asyncio.create_task(drain_agent_response())
         try:
-            cartesia_succeeded = await self._stream_cartesia_speech_chunks(
+            elevenlabs_succeeded = await self._stream_elevenlabs_speech_chunks(
                 response_id,
                 speakable_chunks(),
                 final_detected_at,
                 metadata=metadata,
             )
-            if not cartesia_succeeded:
+            if not elevenlabs_succeeded:
                 if not stream_complete:
                     await drain_task
                 if not full_response.strip():
@@ -1518,7 +1495,7 @@ class MockConversationSession:
                 await self._stream_tts_fallback(
                     response_id,
                     final_detected_at,
-                    fallback_from="cartesia",
+                    fallback_from="elevenlabs",
                     metadata=metadata,
                 )
             await drain_task

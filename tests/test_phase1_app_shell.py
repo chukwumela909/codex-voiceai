@@ -1,22 +1,38 @@
-import os
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-os.environ["VOICE_AGENT_MODE"] = "mock"
-os.environ["VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS"] = "1000"
-
+import app.main as main_mod
+from app.config import Settings
 from app.main import app, log_server_event
 
 
 client = TestClient(app)
 
 
+@pytest.fixture
+def shell_settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """Pin app.main.settings to a known mock-mode config for this test.
+
+    app.main snapshots settings at import time, so whichever test module
+    imports it first decides what the endpoints see — mutating os.environ at
+    module import only works when this file wins that race. Patching the
+    module attribute instead keeps these tests order-independent and off the
+    developer's .env (which may select live mode with real keys).
+    """
+    monkeypatch.setenv("VOICE_AGENT_MODE", "mock")
+    monkeypatch.setenv("VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS", "1000")
+    settings = Settings(_env_file=None)
+    monkeypatch.setattr(main_mod, "settings", settings)
+    return settings
+
+
 def mock_speech_frame(sample_count=12000, amplitude=12000):
     return int(amplitude).to_bytes(2, "little", signed=True) * sample_count
 
 
-def test_health_reports_service_and_config_status():
+def test_health_reports_service_and_config_status(shell_settings):
     response = client.get("/health")
 
     assert response.status_code == 200
@@ -74,7 +90,7 @@ def test_event_logging_includes_operational_stage_and_provider(caplog):
             "session_id": "sess_test",
             "payload": {
                 "stage": "tts_streaming",
-                "provider": "cartesia",
+                "provider": "elevenlabs",
                 "response_id": "resp_test",
             },
         }
@@ -82,7 +98,7 @@ def test_event_logging_includes_operational_stage_and_provider(caplog):
 
     assert "event=pipeline.stage" in caplog.text
     assert "stage=tts_streaming" in caplog.text
-    assert "provider=cartesia" in caplog.text
+    assert "provider=elevenlabs" in caplog.text
     assert "response_id=resp_test" in caplog.text
 
 
@@ -157,7 +173,7 @@ def test_event_logging_includes_audio_input_levels(caplog):
     assert "input_gain=2.0" in caplog.text
 
 
-def test_browser_websocket_starts_session_and_accepts_hello():
+def test_browser_websocket_starts_session_and_accepts_hello(shell_settings):
     with client.websocket_connect("/ws/browser") as websocket:
         started = websocket.receive_json()
         connected = websocket.receive_json()
@@ -181,7 +197,7 @@ def test_browser_websocket_starts_session_and_accepts_hello():
         assert ready["payload"]["client"] == "test"
 
 
-def test_browser_websocket_mock_audio_loop_emits_transcript_agent_audio_and_latency():
+def test_browser_websocket_mock_audio_loop_emits_transcript_agent_audio_and_latency(shell_settings):
     with client.websocket_connect("/ws/browser") as websocket:
         websocket.receive_json()
         websocket.receive_json()

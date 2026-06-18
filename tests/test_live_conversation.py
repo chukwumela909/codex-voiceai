@@ -7,7 +7,7 @@ import app.mock_conversation as mock_conversation
 from app.exceptions import ClientConnectionClosed
 from app.mock_conversation import MockConversationSession, apply_pcm_gain, calculate_pcm_level
 
-VALID_CARTESIA_VOICE_ID = "6bf6d6c3-9d45-48fb-94a9-4840f83eb385"
+VALID_ELEVENLABS_VOICE_ID = "6bf6d6c3-9d45-48fb-94a9-4840f83eb385"
 
 
 def test_apply_pcm_gain_amplifies_quiet_audio_without_changing_frame_size():
@@ -41,7 +41,7 @@ def test_proactive_source_does_not_embed_canned_greeting_terms():
         assert forbidden not in source
 
 
-def test_speech_final_transcript_starts_agent_response_without_cartesia_precheck():
+def test_speech_final_transcript_starts_agent_response_without_elevenlabs_precheck():
     events = []
     settings = SimpleNamespace(
         normalized_mode="live",
@@ -49,8 +49,8 @@ def test_speech_final_transcript_starts_agent_response_without_cartesia_precheck
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         deepgram_endpointing_ms=300,
         partial_idle_finalize_ms=650,
     )
@@ -100,8 +100,8 @@ def test_live_agent_receives_hidden_intent_inference_context_but_events_keep_raw
     settings = proactive_settings(
         normalized_mode="live",
         groq_api_key="groq-key",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         intent_inference_enabled=True,
     )
 
@@ -264,8 +264,15 @@ def proactive_settings(**overrides):
         "groq_model": "llama-3.1-8b-instant",
         "groq_temperature": 0.7,
         "persona": "Be concise.",
-        "cartesia_api_key": None,
-        "cartesia_voice_id": None,
+        "elevenlabs_api_key": None,
+        "elevenlabs_voice_id": None,
+        "elevenlabs_model": "eleven_flash_v2_5",
+        "elevenlabs_sample_rate": 16000,
+        "elevenlabs_speed": 1.0,
+        "elevenlabs_stability": 0.5,
+        "elevenlabs_similarity_boost": 0.8,
+        "elevenlabs_style": 0.0,
+        "elevenlabs_use_speaker_boost": False,
         "proactive_effective_enabled": True,
         "partial_idle_finalize_ms": 650,
         "proactive_startup_greeting_delay_ms": 1,
@@ -1053,11 +1060,10 @@ def test_new_speech_during_proactive_tts_interrupts_without_stale_transcript():
             proactive_settings(
                 normalized_mode="live",
                 groq_api_key="test-key",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,
                 proactive_silence_timeout_ms=1,
             ),
         )
@@ -1121,7 +1127,7 @@ def test_proactive_tts_error_has_metadata_and_counts_failure():
 
     class FailingSynthesizer:
         async def stream_speech(self, message, *, context_id):
-            yield {"type": "error", "message": "cartesia went sideways"}
+            yield {"type": "error", "message": "elevenlabs went sideways"}
 
     async def send_event(event):
         events.append(event)
@@ -1132,15 +1138,13 @@ def test_proactive_tts_error_has_metadata_and_counts_failure():
             send_event,
             proactive_settings(
                 normalized_mode="live",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
-            ),
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,            ),
         )
         session.synthesizer = FailingSynthesizer()
-        await session._stream_cartesia_speech(
+        await session._stream_elevenlabs_speech(
             "resp_test",
             "Hello.",
             0,
@@ -1156,7 +1160,7 @@ def test_proactive_tts_error_has_metadata_and_counts_failure():
 
     assert failure_counts == [1]
     error_payload = next(event["payload"] for event in events if event["type"] == "error")
-    assert error_payload["provider"] == "cartesia"
+    assert error_payload["provider"] == "elevenlabs"
     assert error_payload["proactive"] is True
     assert error_payload["trigger_reason"] == "silence_nudge"
     assert error_payload["proactive_turn_id"] == "pro_test"
@@ -1178,22 +1182,20 @@ def test_tts_error_falls_back_to_audible_mock_audio():
             send_event,
             proactive_settings(
                 normalized_mode="live",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id="6bf6d6c3-9d45-48fb-94a9-4840f83eb385",
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
-            ),
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id="6bf6d6c3-9d45-48fb-94a9-4840f83eb385",
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,            ),
         )
         session.synthesizer = FailingSynthesizer()
         await session._stream_speech("resp_test", "Hello.", 0)
 
     asyncio.run(run_session())
 
-    assert any(event["payload"].get("provider") == "cartesia" for event in events if event["type"] == "error")
+    assert any(event["payload"].get("provider") == "elevenlabs" for event in events if event["type"] == "error")
     assert any(
         event["payload"].get("stage") == "tts_fallback"
-        and event["payload"].get("fallback_from") == "cartesia"
+        and event["payload"].get("fallback_from") == "elevenlabs"
         for event in events
         if event["type"] == "pipeline.stage"
     )
@@ -1203,14 +1205,14 @@ def test_tts_error_falls_back_to_audible_mock_audio():
     assert audio_events[-1]["payload"]["audio"]
 
 
-def test_cartesia_error_after_audio_chunk_falls_back_to_mock_audio():
+def test_elevenlabs_error_after_audio_chunk_falls_back_to_mock_audio():
     events = []
     audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
 
     class PartiallyFailingSynthesizer:
         async def stream_speech(self, transcript, *, context_id=None):
             yield {"type": "chunk", "audio": audio, "context_id": context_id}
-            yield {"type": "error", "message": "cartesia stream failed", "context_id": context_id, "done": True}
+            yield {"type": "error", "message": "elevenlabs stream failed", "context_id": context_id, "done": True}
 
     async def send_event(event):
         events.append(event)
@@ -1221,30 +1223,28 @@ def test_cartesia_error_after_audio_chunk_falls_back_to_mock_audio():
             send_event,
             proactive_settings(
                 normalized_mode="live",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
-            ),
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,            ),
         )
         session.synthesizer = PartiallyFailingSynthesizer()
-        await session._stream_speech("resp_test", "Hello from Cartesia.", 0)
+        await session._stream_speech("resp_test", "Hello from ElevenLabs.", 0)
 
     asyncio.run(run_session())
 
     audio_providers = [event["payload"].get("provider") for event in events if event["type"] == "audio.chunk"]
-    assert audio_providers == ["cartesia", "mock"]
-    assert any(event["type"] == "error" and event["payload"].get("provider") == "cartesia" for event in events)
+    assert audio_providers == ["elevenlabs", "mock"]
+    assert any(event["type"] == "error" and event["payload"].get("provider") == "elevenlabs" for event in events)
     assert any(
         event["type"] == "pipeline.stage"
         and event["payload"].get("stage") == "tts_fallback"
-        and event["payload"].get("fallback_from") == "cartesia"
+        and event["payload"].get("fallback_from") == "elevenlabs"
         for event in events
     )
 
 
-def test_live_cartesia_audio_can_start_before_llm_final_text_event():
+def test_live_elevenlabs_audio_can_start_before_llm_final_text_event():
     events = []
     audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
     spoken_chunks = []
@@ -1272,12 +1272,11 @@ def test_live_cartesia_audio_can_start_before_llm_final_text_event():
             proactive_settings(
                 normalized_mode="live",
                 groq_api_key="groq-key",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
-                cartesia_speed=1.2,
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,
+                elevenlabs_speed=1.2,
             ),
         )
         session.agent = SlowAgent()
@@ -1291,7 +1290,7 @@ def test_live_cartesia_audio_can_start_before_llm_final_text_event():
     assert spoken_chunks == ["This first sentence can speak now. ", "Second sentence arrives later. "]
 
 
-def test_cartesia_streaming_failure_does_not_truncate_final_agent_text():
+def test_elevenlabs_streaming_failure_does_not_truncate_final_agent_text():
     events = []
     spoken_chunks = []
 
@@ -1318,15 +1317,11 @@ def test_cartesia_streaming_failure_does_not_truncate_final_agent_text():
             proactive_settings(
                 normalized_mode="live",
                 groq_api_key="groq-key",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
-                cartesia_speed=1.2,
-                cartesia_speech_director_enabled=True,
-                cartesia_ssml_enabled=True,
-                cartesia_emotion_tags_enabled=False,
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,
+                elevenlabs_speed=1.2,
             ),
         )
         session.agent = TwoChunkAgent()
@@ -1342,16 +1337,16 @@ def test_cartesia_streaming_failure_does_not_truncate_final_agent_text():
     )
     assert "<break" not in final["payload"]["text"]
     assert spoken_chunks == ["This first sentence can speak now. "]
-    assert any(event["type"] == "error" and event["payload"].get("provider") == "cartesia" for event in events)
+    assert any(event["type"] == "error" and event["payload"].get("provider") == "elevenlabs" for event in events)
     assert any(
         event["type"] == "pipeline.stage"
         and event["payload"].get("stage") == "tts_fallback"
-        and event["payload"].get("fallback_from") == "cartesia"
+        and event["payload"].get("fallback_from") == "elevenlabs"
         for event in events
     )
 
 
-def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_plain():
+def test_streaming_elevenlabs_strips_markup_while_frontend_text_stays_plain():
     events = []
     audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
     spoken_chunks = []
@@ -1380,15 +1375,11 @@ def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_p
             proactive_settings(
                 normalized_mode="live",
                 groq_api_key="groq-key",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
-                cartesia_speed=1.2,
-                cartesia_speech_director_enabled=True,
-                cartesia_ssml_enabled=True,
-                cartesia_emotion_tags_enabled=False,
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,
+                elevenlabs_speed=1.2,
             ),
         )
         session.agent = ClarifyingAgent()
@@ -1402,19 +1393,20 @@ def test_streaming_cartesia_receives_directed_speech_while_frontend_text_stays_p
         'Well,<break time="180ms"/> I think you meant '
         '<prosody rate="fast">the Deepgram</prosody> model is missing words.'
     )
+    # ElevenLabs has no tag support, so ALL inline markup is stripped before TTS.
     assert spoken_chunks == [
-        'Well,<break time="180ms"/> I think you meant the Deepgram model is missing words. '
+        "Well, I think you meant the Deepgram model is missing words. "
     ]
     assert any(
         event["type"] == "pipeline.stage"
-        and event["payload"].get("stage") == "tts_speech_direction"
+        and event["payload"].get("stage") == "tts_markup_stripped"
         and event["payload"].get("directed") is True
         and event["payload"].get("tags_stripped", 0) >= 1
         for event in events
     )
 
 
-def test_cartesia_uses_plain_text_when_speech_direction_fails(monkeypatch):
+def test_elevenlabs_uses_plain_text_when_markup_stripping_fails(monkeypatch):
     events = []
     audio = base64.b64encode(b"\x00\x00" * 120).decode("ascii")
     spoken_messages = []
@@ -1425,10 +1417,10 @@ def test_cartesia_uses_plain_text_when_speech_direction_fails(monkeypatch):
             yield {"type": "chunk", "audio": audio, "context_id": context_id}
             yield {"type": "done", "context_id": context_id, "done": True}
 
-    def failing_director(text, config):
-        raise RuntimeError("direction unavailable")
+    def failing_strip(text):
+        raise RuntimeError("strip unavailable")
 
-    monkeypatch.setattr(mock_conversation, "direct_speech_for_cartesia_detailed", failing_director)
+    monkeypatch.setattr(mock_conversation, "strip_markup_for_tts_detailed", failing_strip)
 
     async def send_event(event):
         events.append(event)
@@ -1439,15 +1431,14 @@ def test_cartesia_uses_plain_text_when_speech_direction_fails(monkeypatch):
             send_event,
             proactive_settings(
                 normalized_mode="live",
-                cartesia_api_key="cartesia-key",
-                cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-                cartesia_model="sonic-3",
-                cartesia_sample_rate=16000,
-                cartesia_version="2026-03-01",
+                elevenlabs_api_key="elevenlabs-key",
+                elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+                elevenlabs_model="eleven_flash_v2_5",
+                elevenlabs_sample_rate=16000,
             ),
         )
         session.synthesizer = StreamingSynthesizer()
-        result = await session._stream_cartesia_speech("resp_test", "Set API mode.", 0)
+        result = await session._stream_elevenlabs_speech("resp_test", "Set API mode.", 0)
         assert result is True
 
     asyncio.run(run_session())
@@ -1455,8 +1446,8 @@ def test_cartesia_uses_plain_text_when_speech_direction_fails(monkeypatch):
     assert spoken_messages == ["Set API mode."]
     assert any(
         event["type"] == "error"
-        and event["payload"].get("provider") == "cartesia"
-        and "Speech direction failed: direction unavailable" in event["payload"].get("message", "")
+        and event["payload"].get("provider") == "elevenlabs"
+        and "Markup stripping failed: strip unavailable" in event["payload"].get("message", "")
         for event in events
     )
 
@@ -1549,8 +1540,8 @@ def test_deepgram_start_failure_falls_back_to_mock_turn_detection(monkeypatch):
                 deepgram_model="nova-3",
                 deepgram_endpointing_ms=300,
                 deepgram_utterance_end_ms=1000,
-                cartesia_api_key=None,
-                cartesia_voice_id=None,
+                elevenlabs_api_key=None,
+                elevenlabs_voice_id=None,
             ),
         )
         await session.configure_audio(
@@ -1613,8 +1604,8 @@ def test_deepgram_send_failure_falls_back_without_closing_session(monkeypatch):
                 deepgram_model="nova-3",
                 deepgram_endpointing_ms=300,
                 deepgram_utterance_end_ms=1000,
-                cartesia_api_key=None,
-                cartesia_voice_id=None,
+                elevenlabs_api_key=None,
+                elevenlabs_voice_id=None,
             ),
         )
         await session.configure_audio(
@@ -1686,8 +1677,8 @@ def test_final_transcript_without_speech_final_buffers_until_utterance_end():
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         deepgram_endpointing_ms=300,
         partial_idle_finalize_ms=650,
     )
@@ -1738,8 +1729,8 @@ def test_partial_transcript_idle_timeout_starts_agent_response():
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         deepgram_endpointing_ms=1000,
         partial_idle_finalize_ms=1,
     )
@@ -1791,8 +1782,8 @@ def test_duplicate_active_turn_transcript_does_not_interrupt_response():
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         deepgram_endpointing_ms=300,
     )
     response_started = asyncio.Event()
@@ -1848,8 +1839,8 @@ def test_partial_transcript_during_active_response_does_not_interrupt():
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         deepgram_endpointing_ms=300,
     )
     first_response_started = asyncio.Event()
@@ -1905,8 +1896,8 @@ def test_assistant_echo_during_active_response_does_not_interrupt():
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         deepgram_endpointing_ms=300,
     )
     response_text_started = asyncio.Event()
@@ -1962,8 +1953,8 @@ def test_new_speech_during_active_response_interrupts_and_starts_next_turn():
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key=None,
-        cartesia_voice_id=None,
+        elevenlabs_api_key=None,
+        elevenlabs_voice_id=None,
         deepgram_endpointing_ms=300,
     )
     first_response_started = asyncio.Event()
@@ -2029,11 +2020,10 @@ def test_new_speech_during_tts_does_not_record_interrupted_assistant_turn():
         groq_model="llama-3.1-8b-instant",
         groq_temperature=0.7,
         persona="Be concise.",
-        cartesia_api_key="cartesia-key",
-        cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-        cartesia_model="sonic-3",
-        cartesia_sample_rate=16000,
-        cartesia_version="2026-03-01",
+        elevenlabs_api_key="elevenlabs-key",
+        elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+        elevenlabs_model="eleven_flash_v2_5",
+        elevenlabs_sample_rate=16000,
         deepgram_endpointing_ms=300,
     )
     first_tts_started = asyncio.Event()
@@ -2060,7 +2050,7 @@ def test_new_speech_during_tts_does_not_record_interrupted_assistant_turn():
             return True
 
         session._stream_live_agent_response = stream_response
-        session._stream_cartesia_speech = stream_speech
+        session._stream_elevenlabs_speech = stream_speech
 
         await session.handle_live_transcript(
             {
@@ -2097,16 +2087,14 @@ def test_new_speech_during_tts_does_not_record_interrupted_assistant_turn():
     assert event_types.count("audio.chunk") == 1
 
 
-def test_dead_browser_send_stops_cartesia_without_provider_error():
+def test_dead_browser_send_stops_elevenlabs_without_provider_error():
     events = []
     settings = SimpleNamespace(
         normalized_mode="live",
-        cartesia_api_key="cartesia-key",
-        cartesia_voice_id=VALID_CARTESIA_VOICE_ID,
-        cartesia_model="sonic-3",
-        cartesia_sample_rate=16000,
-        cartesia_version="2026-03-01",
-    )
+        elevenlabs_api_key="elevenlabs-key",
+        elevenlabs_voice_id=VALID_ELEVENLABS_VOICE_ID,
+        elevenlabs_model="eleven_flash_v2_5",
+        elevenlabs_sample_rate=16000,    )
 
     async def send_event(event):
         if event["type"] == "audio.chunk":
@@ -2124,7 +2112,7 @@ def test_dead_browser_send_stops_cartesia_without_provider_error():
         session = MockConversationSession("sess_test", send_event, settings)
         session.synthesizer = FakeSynthesizer()
         try:
-            await session._stream_cartesia_speech("resp_test", "Hello.", 0)
+            await session._stream_elevenlabs_speech("resp_test", "Hello.", 0)
         except ClientConnectionClosed:
             pass
         assert session.closed is True
@@ -2134,7 +2122,7 @@ def test_dead_browser_send_stops_cartesia_without_provider_error():
     event_types = [event["type"] for event in events]
     assert "error" not in event_types
     assert not any(
-        event["payload"].get("stage") == "cartesia_failed"
+        event["payload"].get("stage") == "elevenlabs_failed"
         for event in events
         if event["type"] == "pipeline.stage"
     )

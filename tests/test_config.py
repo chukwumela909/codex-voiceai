@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from app.config import Settings
 
 
@@ -37,12 +40,12 @@ def test_wildcard_cors_disables_credentials(monkeypatch):
 
 
 def test_public_config_status_never_exposes_secret_values(monkeypatch):
-    voice_secret = "6bf6d6c3-9d45-48fb-94a9-4840f83eb385"
+    voice_secret = "21m00Tcm4TlvDq8ikWAM"
     monkeypatch.setenv("VOICE_AGENT_MODE", "live")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "dg-secret")
     monkeypatch.setenv("GROQ_API_KEY", "groq-secret")
-    monkeypatch.setenv("CARTESIA_API_KEY", "cartesia-secret")
-    monkeypatch.setenv("CARTESIA_VOICE_ID", voice_secret)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "elevenlabs-secret")
+    monkeypatch.setenv("ELEVENLABS_VOICE_ID", voice_secret)
 
     status = Settings(_env_file=None).public_config_status()
 
@@ -50,40 +53,39 @@ def test_public_config_status_never_exposes_secret_values(monkeypatch):
     assert status["live_ready"] is True
     assert "dg-secret" not in rendered
     assert "groq-secret" not in rendered
-    assert "cartesia-secret" not in rendered
+    assert "elevenlabs-secret" not in rendered
     assert voice_secret not in rendered
 
 
-def test_cartesia_voice_id_normalizes_leading_uuid_from_accidental_trailing_text(monkeypatch):
-    voice_id = "6bf6d6c3-9d45-48fb-94a9-4840f83eb385"
+def test_elevenlabs_voice_id_trims_surrounding_quotes_and_whitespace(monkeypatch):
+    voice_id = "21m00Tcm4TlvDq8ikWAM"
     monkeypatch.setenv("VOICE_AGENT_MODE", "live")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "dg-secret")
     monkeypatch.setenv("GROQ_API_KEY", "groq-secret")
-    monkeypatch.setenv("CARTESIA_API_KEY", "cartesia-secret")
-    monkeypatch.setenv("CARTESIA_VOICE_ID", f"{voice_id} pasted words by mistake")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "elevenlabs-secret")
+    monkeypatch.setenv("ELEVENLABS_VOICE_ID", f'  "{voice_id}"  ')
 
     settings = Settings(_env_file=None)
     status = settings.public_config_status()
 
-    assert settings.cartesia_voice_id == voice_id
+    # ElevenLabs voice ids are opaque strings (not UUIDs); only stray quoting/whitespace is trimmed.
+    assert settings.elevenlabs_voice_id == voice_id
     assert status["live_ready"] is True
     assert status["invalid_live_keys"] == []
 
 
-def test_live_ready_rejects_unrecoverable_cartesia_voice_id(monkeypatch):
-    bad_voice_id = "not-a-real-voice-id"
+def test_live_ready_requires_elevenlabs_voice_id(monkeypatch):
     monkeypatch.setenv("VOICE_AGENT_MODE", "live")
     monkeypatch.setenv("DEEPGRAM_API_KEY", "dg-secret")
     monkeypatch.setenv("GROQ_API_KEY", "groq-secret")
-    monkeypatch.setenv("CARTESIA_API_KEY", "cartesia-secret")
-    monkeypatch.setenv("CARTESIA_VOICE_ID", bad_voice_id)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "elevenlabs-secret")
+    monkeypatch.delenv("ELEVENLABS_VOICE_ID", raising=False)
 
     status = Settings(_env_file=None).public_config_status()
 
     assert status["live_ready"] is False
-    assert status["missing_live_keys"] == []
-    assert status["invalid_live_keys"] == ["CARTESIA_VOICE_ID"]
-    assert bad_voice_id not in str(status)
+    assert status["missing_live_keys"] == ["ELEVENLABS_VOICE_ID"]
+    assert status["invalid_live_keys"] == []
 
 
 def test_websocket_keepalive_defaults_and_overrides(monkeypatch):
@@ -123,6 +125,18 @@ def test_balanced_fast_voice_timing_defaults(monkeypatch):
         "deepgram_endpointing_ms": 200,
         "deepgram_utterance_end_ms": 1000,
         "partial_idle_finalize_ms": 500,
+        "vad": {
+            "confidence": 0.7,
+            "start_secs": 0.2,
+            "stop_secs": 0.2,
+            "min_volume": 0.6,
+        },
+        "smart_turn": {
+            "enabled": True,
+            "stop_secs": 3.0,
+        },
+        "speech_timeout_stop_secs": 0.8,
+        "interruption_min_words": 2,
     }
     assert status["audio"] == {
         "input_gain": 2.0,
@@ -138,35 +152,36 @@ def test_input_gain_can_be_tuned_for_quiet_microphones(monkeypatch):
     assert settings.public_config_status()["audio"]["input_gain"] == 3.25
 
 
-def test_contextual_speech_public_config_defaults_and_overrides(monkeypatch):
+def test_intent_inference_public_config_defaults_and_overrides(monkeypatch):
     monkeypatch.delenv("VOICE_AGENT_INTENT_INFERENCE_ENABLED", raising=False)
-    monkeypatch.delenv("VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED", raising=False)
-    monkeypatch.delenv("VOICE_AGENT_CARTESIA_SSML_ENABLED", raising=False)
-    monkeypatch.delenv("VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED", raising=False)
 
     defaults = Settings(_env_file=None).public_config_status()
 
     monkeypatch.setenv("VOICE_AGENT_INTENT_INFERENCE_ENABLED", "false")
-    monkeypatch.setenv("VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED", "false")
-    monkeypatch.setenv("VOICE_AGENT_CARTESIA_SSML_ENABLED", "false")
-    monkeypatch.setenv("VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED", "true")
     overridden = Settings(_env_file=None).public_config_status()
 
-    assert defaults["conversation"] == {
-        "intent_inference_enabled": True,
-    }
-    assert defaults["cartesia"]["speech_direction"] == {
-        "enabled": True,
-        "ssml_enabled": True,
-        "emotion_tags_enabled": False,
-    }
-    assert overridden["conversation"] == {
-        "intent_inference_enabled": False,
-    }
-    assert overridden["cartesia"]["speech_direction"] == {
-        "enabled": False,
-        "ssml_enabled": False,
-        "emotion_tags_enabled": True,
+    assert defaults["conversation"] == {"intent_inference_enabled": True}
+    assert overridden["conversation"] == {"intent_inference_enabled": False}
+
+
+def test_elevenlabs_voice_settings_reported_in_public_config(monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_MODEL", raising=False)
+    monkeypatch.delenv("ELEVENLABS_STABILITY", raising=False)
+    monkeypatch.delenv("ELEVENLABS_SIMILARITY_BOOST", raising=False)
+    monkeypatch.delenv("ELEVENLABS_STYLE", raising=False)
+    monkeypatch.delenv("ELEVENLABS_USE_SPEAKER_BOOST", raising=False)
+    monkeypatch.delenv("ELEVENLABS_SPEED", raising=False)
+
+    status = Settings(_env_file=None).public_config_status()
+
+    assert status["elevenlabs"]["model"] == "eleven_flash_v2_5"
+    assert status["elevenlabs"]["sample_rate"] == 16000
+    assert status["elevenlabs"]["voice_settings"] == {
+        "stability": 0.5,
+        "similarity_boost": 0.8,
+        "style": 0.0,
+        "use_speaker_boost": False,
+        "speed": 1.0,
     }
 
 
@@ -194,37 +209,44 @@ def test_ambience_public_config_defaults_and_overrides(monkeypatch):
     }
 
 
-def test_cartesia_speed_defaults_to_faster_spoken_agent_and_can_be_overridden(monkeypatch):
-    monkeypatch.delenv("CARTESIA_SPEED", raising=False)
+def test_elevenlabs_speed_defaults_and_can_be_overridden_within_range(monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_SPEED", raising=False)
 
     default_settings = Settings(_env_file=None)
 
-    monkeypatch.setenv("CARTESIA_SPEED", "1.35")
+    monkeypatch.setenv("ELEVENLABS_SPEED", "1.15")
     overridden_settings = Settings(_env_file=None)
 
-    assert default_settings.cartesia_speed == 1.2
-    assert overridden_settings.cartesia_speed == 1.35
+    assert default_settings.elevenlabs_speed == 1.0
+    assert overridden_settings.elevenlabs_speed == 1.15
 
 
-def test_cartesia_websocket_retry_defaults_and_overrides(monkeypatch):
-    monkeypatch.delenv("CARTESIA_OPEN_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.delenv("CARTESIA_CONNECT_RETRIES", raising=False)
+def test_elevenlabs_speed_out_of_range_is_rejected(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_SPEED", "1.5")
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_elevenlabs_websocket_retry_defaults_and_overrides(monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_OPEN_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("ELEVENLABS_CONNECT_RETRIES", raising=False)
 
     default_settings = Settings(_env_file=None)
     default_status = default_settings.public_config_status()
 
-    monkeypatch.setenv("CARTESIA_OPEN_TIMEOUT_SECONDS", "4.5")
-    monkeypatch.setenv("CARTESIA_CONNECT_RETRIES", "2")
+    monkeypatch.setenv("ELEVENLABS_OPEN_TIMEOUT_SECONDS", "4.5")
+    monkeypatch.setenv("ELEVENLABS_CONNECT_RETRIES", "2")
     overridden_settings = Settings(_env_file=None)
 
-    assert default_settings.cartesia_open_timeout_seconds == 8.0
-    assert default_settings.cartesia_connect_retries == 1
-    assert default_status["cartesia"]["connection"] == {
+    assert default_settings.elevenlabs_open_timeout_seconds == 8.0
+    assert default_settings.elevenlabs_connect_retries == 1
+    assert default_status["elevenlabs"]["connection"] == {
         "open_timeout_seconds": 8.0,
         "connect_retries": 1,
     }
-    assert overridden_settings.cartesia_open_timeout_seconds == 4.5
-    assert overridden_settings.cartesia_connect_retries == 2
+    assert overridden_settings.elevenlabs_open_timeout_seconds == 4.5
+    assert overridden_settings.elevenlabs_connect_retries == 2
 
 
 def test_proactive_auto_enabled_in_mock_and_live_opt_in(monkeypatch):

@@ -28,7 +28,7 @@ docker run -p 8000:8000 --env-file .env codex-voiceai
 
 Set `VOICE_AGENT_MODE` in `.env`:
 - **`mock`** (default) — no API keys needed; uses simulated transcript, sine-wave audio, canned agent responses
-- **`live`** — requires `DEEPGRAM_API_KEY`, `GROQ_API_KEY`, `CARTESIA_API_KEY`, `CARTESIA_VOICE_ID`
+- **`live`** — requires `DEEPGRAM_API_KEY`, `GROQ_API_KEY`, `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`
 
 The health endpoint `GET /health` reports which providers are configured.
 
@@ -42,7 +42,7 @@ Browser (frontend/app.js)
        └─ MockConversationSession (app/mock_conversation.py)
             ├─ DeepgramStreamingTranscriber (app/deepgram.py)   ← STT
             ├─ GroqStreamingAgent (app/groq_agent.py)           ← LLM
-            └─ CartesiaStreamingTTS (app/cartesia_tts.py)       ← TTS
+            └─ ElevenLabsStreamingTTS (app/elevenlabs_tts.py)   ← TTS
 ```
 
 One WebSocket connection = one conversation session. The server streams JSON events back to the browser at every pipeline stage.
@@ -55,7 +55,7 @@ One WebSocket connection = one conversation session. The server streams JSON eve
 - **`app/mock_conversation.py`** — Core session logic (~530 lines); handles audio ingestion (PCM S16LE framing, RMS/peak analysis), turn detection, provider orchestration, and graceful fallback to mock when providers fail
 - **`app/groq_agent.py`** — Groq LLM adapter; `pop_speakable_chunks()` splits streaming delta text into TTS-ready sentence fragments (≥24 chars on `.!?\n`, or every 90 chars at a word boundary)
 - **`app/deepgram.py`** — Deepgram WebSocket STT; emits on `is_final` and `speech_final` signals
-- **`app/cartesia_tts.py`** — Cartesia WebSocket TTS; returns base64-encoded PCM audio chunks with context IDs
+- **`app/elevenlabs_tts.py`** — ElevenLabs WebSocket (`stream-input`) TTS; returns base64-encoded PCM audio chunks
 
 ### Frontend
 

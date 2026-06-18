@@ -1076,7 +1076,10 @@ body[data-app-state="active"] .dock__hint {
 
 /* Character list */
 .char-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.char-list__item { display: flex; align-items: stretch; gap: 4px; }
 .char-list__btn {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -1115,6 +1118,25 @@ body[data-app-state="active"] .dock__hint {
   color: var(--on-dark);
   border-radius: var(--r-pill);
   padding: 2px 7px;
+}
+.char-list__make-default {
+  flex: 0 0 auto;
+  align-self: center;
+  font-size: 0.68rem;
+  white-space: nowrap;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-md);
+  padding: 4px 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.char-list__item:hover .char-list__make-default { opacity: 1; }
+.char-list__make-default:hover {
+  color: var(--ink);
+  border-color: var(--ink);
 }
 
 /* Editor form */

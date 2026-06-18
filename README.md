@@ -1,6 +1,6 @@
 # Browser-First Conversational Voice Agent
 
-Local browser voice agent with Deepgram streaming transcription, Groq streaming responses, Cartesia speech, browser playback, and Phase 6 barge-in interruption.
+Local browser voice agent with Deepgram streaming transcription, Groq streaming responses, ElevenLabs speech, browser playback, and Phase 6 barge-in interruption.
 
 ## Local Setup
 
@@ -28,15 +28,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - Deepgram streaming STT
 - Groq streaming LLM responses
-- Cartesia streaming TTS
+- ElevenLabs streaming TTS
 - Browser playback and barge-in cancellation
 
 Live mode expects these values:
 
 - `DEEPGRAM_API_KEY`
 - `GROQ_API_KEY`
-- `CARTESIA_API_KEY`
-- `CARTESIA_VOICE_ID`
+- `ELEVENLABS_API_KEY`
+- `ELEVENLABS_VOICE_ID`
 
 The app still boots if live keys are missing. `/health` and WebSocket `config.warning` events report missing variable names without exposing secret values.
 
@@ -61,15 +61,16 @@ Provider tuning:
 - `VOICE_AGENT_INTENT_INFERENCE_ENABLED`, default `true`; keeps raw transcripts visible while adding hidden Groq guidance to infer likely intent from recent context
 - `GROQ_MODEL`, default `llama-3.1-8b-instant`
 - `GROQ_TEMPERATURE`, default `0.7`
-- `CARTESIA_MODEL`, default `sonic-3`
-- `CARTESIA_SPEED`, default `1.2` (`0.6` to `1.5`; higher is faster)
-- `CARTESIA_SAMPLE_RATE`, default `16000`
-- `CARTESIA_VERSION`, default `2026-03-01`
-- `CARTESIA_OPEN_TIMEOUT_SECONDS`, default `8`; WebSocket opening-handshake timeout per attempt
-- `CARTESIA_CONNECT_RETRIES`, default `1`; retry count for transient Cartesia opening-handshake timeouts
-- `VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED`, default `true`
-- `VOICE_AGENT_CARTESIA_SSML_ENABLED`, default `true`
-- `VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED`, default `false`
+- `ELEVENLABS_MODEL`, default `eleven_flash_v2_5`. Note: `eleven_v3` is **not** supported on the realtime WebSocket the pipeline uses — keep a streaming model (`eleven_flash_v2_5` or `eleven_turbo_v2_5`)
+- `ELEVENLABS_VOICE_ID`; an ElevenLabs voice id (opaque string, e.g. `21m00Tcm4TlvDq8ikWAM`)
+- `ELEVENLABS_SAMPLE_RATE`, default `16000`
+- `ELEVENLABS_SPEED`, default `1.0` (`0.7` to `1.2`; higher is faster)
+- `ELEVENLABS_STABILITY`, default `0.5` (`0.0` to `1.0`)
+- `ELEVENLABS_SIMILARITY_BOOST`, default `0.8` (`0.0` to `1.0`)
+- `ELEVENLABS_STYLE`, default `0.0` (`0.0` to `1.0`)
+- `ELEVENLABS_USE_SPEAKER_BOOST`, default `false`
+- `ELEVENLABS_OPEN_TIMEOUT_SECONDS`, default `8`; WebSocket opening-handshake timeout per attempt
+- `ELEVENLABS_CONNECT_RETRIES`, default `1`; retry count for transient opening-handshake timeouts
 - `VOICE_AGENT_PERSONA`
 
 Phone-call ambience:
@@ -86,7 +87,7 @@ Live mode preserves raw Deepgram transcripts in `transcript.partial`, `transcrip
 
 `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS` controls the app fallback used when Deepgram has not emitted `speech_final`. The default is `1000ms` to leave more room for natural thinking pauses. Lower it for snappier demos; raise it when the assistant interrupts too early.
 
-When Cartesia is configured, `VOICE_AGENT_CARTESIA_SPEECH_DIRECTOR_ENABLED=true` applies conservative SSML-style speech direction to TTS input only. Frontend assistant text stays plain. The director adds short context-relevant pauses after discourse markers, pauses before inferred clarifications, and spells code-like tokens such as API names or numeric IDs. Emotion tags are disabled by default with `VOICE_AGENT_CARTESIA_EMOTION_TAGS_ENABLED=false`.
+ElevenLabs `eleven_flash_v2_5` has no SSML/emotion-tag support, so prosody is controlled entirely through the voice settings (`ELEVENLABS_STABILITY`, `ELEVENLABS_SIMILARITY_BOOST`, `ELEVENLABS_STYLE`, `ELEVENLABS_USE_SPEAKER_BOOST`, `ELEVENLABS_SPEED`). Any stray inline markup the model emits (e.g. `<emotion>`, `<break>`) is stripped before TTS so it is never read aloud.
 
 Proactive conversation tuning:
 
@@ -152,7 +153,7 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
     "providers": {
       "stt": "deepgram",
       "llm": "groq",
-      "tts": "cartesia"
+      "tts": "elevenlabs"
     },
     "audio": {
       "input_gain": 2.0
@@ -160,15 +161,19 @@ Use `/health` for Coolify or other deployment probes. A healthy response looks l
     "conversation": {
       "intent_inference_enabled": true
     },
-    "cartesia": {
+    "elevenlabs": {
+      "model": "eleven_flash_v2_5",
+      "sample_rate": 16000,
       "connection": {
         "open_timeout_seconds": 8.0,
         "connect_retries": 1
       },
-      "speech_direction": {
-        "enabled": true,
-        "ssml_enabled": true,
-        "emotion_tags_enabled": false
+      "voice_settings": {
+        "stability": 0.5,
+        "similarity_boost": 0.8,
+        "style": 0.0,
+        "use_speaker_boost": false,
+        "speed": 1.0
       }
     },
     "ambience": {

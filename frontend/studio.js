@@ -234,7 +234,38 @@
       }
       btn.addEventListener("click", () => onSelect(char.id));
       li.appendChild(btn);
+      if (char.id !== state.defaultId) {
+        const makeDefault = document.createElement("button");
+        makeDefault.type = "button";
+        makeDefault.className = "char-list__make-default";
+        makeDefault.textContent = "Make default";
+        makeDefault.title = `Use ${char.name || char.id} on the phone (applies to new calls)`;
+        makeDefault.addEventListener("click", (event) => {
+          event.stopPropagation();
+          setDefault(char.id);
+        });
+        li.appendChild(makeDefault);
+      }
       ul.appendChild(li);
+    }
+  }
+
+  async function setDefault(id) {
+    const status = $("saveStatus");
+    try {
+      const data = await api("PUT", "/characters/default", { id });
+      state.defaultId = data.default;
+      renderList();
+      if (status) {
+        const name = state.charactersById[data.default]?.name || data.default;
+        status.textContent = `Default set to ${name} — new calls use it (no restart needed).`;
+        status.dataset.tone = "ok";
+      }
+    } catch (err) {
+      if (status) {
+        status.textContent = `Could not set default: ${err.message}`;
+        status.dataset.tone = "error";
+      }
     }
   }
 

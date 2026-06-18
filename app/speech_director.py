@@ -1,27 +1,19 @@
-from dataclasses import dataclass
+"""Strip inline markup before sending text to ElevenLabs.
 
-from app.speech_tags import ALLOWED_TAGS, SanitizeResult, sanitize
-
-
-@dataclass(frozen=True)
-class SpeechDirectionConfig:
-    enabled: bool = True
-    ssml_enabled: bool = True
-    emotion_tags_enabled: bool = True
-
-
-def direct_speech_for_cartesia(text: str, config: SpeechDirectionConfig) -> str:
-    return direct_speech_for_cartesia_detailed(text, config).text
+ElevenLabs `eleven_flash_v2_5` has no SSML/emotion/break tag support, so any
+control tags a character prompt might still emit (`<emotion …>`, `<break …>`,
+`<spell>…</spell>`) must be removed or they'd be read aloud. We reuse the
+existing sanitizer with an empty allow-list: every tag is stripped while the
+inner text survives. Expressiveness now lives in ElevenLabs voice settings.
+"""
+from app.speech_tags import SanitizeResult, sanitize
 
 
-def direct_speech_for_cartesia_detailed(text: str, config: SpeechDirectionConfig) -> SanitizeResult:
+def strip_markup_for_tts(text: str) -> str:
+    return strip_markup_for_tts_detailed(text).text
+
+
+def strip_markup_for_tts_detailed(text: str) -> SanitizeResult:
     if not text:
         return SanitizeResult(text=text, stripped=0)
-    if not config.enabled or not config.ssml_enabled:
-        return SanitizeResult(text=text, stripped=0)
-
-    allowed = ALLOWED_TAGS
-    if not config.emotion_tags_enabled:
-        allowed = {name: spec for name, spec in ALLOWED_TAGS.items() if name != "emotion"}
-
-    return sanitize(text, allowed_tags=allowed)
+    return sanitize(text, allowed_tags={})
