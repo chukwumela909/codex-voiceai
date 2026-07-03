@@ -62,7 +62,7 @@ Provider tuning:
 - `GROQ_MODEL`, default `llama-3.1-8b-instant`
 - `GROQ_TEMPERATURE`, default `0.7`
 - `ELEVENLABS_MODEL`, default `eleven_flash_v2_5`. Note: `eleven_v3` is **not** supported on the realtime WebSocket the pipeline uses — keep a streaming model (`eleven_flash_v2_5` or `eleven_turbo_v2_5`)
-- `ELEVENLABS_VOICE_ID`; an ElevenLabs voice id (opaque string, e.g. `21m00Tcm4TlvDq8ikWAM`)
+- `ELEVENLABS_VOICE_ID`; an ElevenLabs voice id (opaque string, e.g. `21m00Tcm4TlvDq8ikWAM`). This is only the fallback default — the active voice can be picked from the UI (see below), which overrides it for all calls
 - `ELEVENLABS_SAMPLE_RATE`, default `16000`
 - `ELEVENLABS_SPEED`, default `1.0` (`0.7` to `1.2`; higher is faster)
 - `ELEVENLABS_STABILITY`, default `0.5` (`0.0` to `1.0`)
@@ -88,6 +88,17 @@ Live mode preserves raw Deepgram transcripts in `transcript.partial`, `transcrip
 `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS` controls the app fallback used when Deepgram has not emitted `speech_final`. The default is `1000ms` to leave more room for natural thinking pauses. Lower it for snappier demos; raise it when the assistant interrupts too early.
 
 ElevenLabs `eleven_flash_v2_5` has no SSML/emotion-tag support, so prosody is controlled entirely through the voice settings (`ELEVENLABS_STABILITY`, `ELEVENLABS_SIMILARITY_BOOST`, `ELEVENLABS_STYLE`, `ELEVENLABS_USE_SPEAKER_BOOST`, `ELEVENLABS_SPEED`). Any stray inline markup the model emits (e.g. `<emotion>`, `<break>`) is stripped before TTS so it is never read aloud.
+
+### Choosing a voice
+
+The active ElevenLabs voice can be picked from the UI (the Pipecat page voice bar) instead of the env — either from the dropdown of your account voices or by pasting a voice id. The choice is persisted server-side (`data/active_voice_id`) and applies to every path: browser calls, Twilio phone calls, and the Studio preview. `ELEVENLABS_VOICE_ID` in the env is only the fallback default. The `ELEVENLABS_API_KEY` always stays in the env — it is never exposed to the browser.
+
+Endpoints:
+- `GET /voices` — your account's voices (`GET /v1/voices`) plus the currently `active` voice; returns an empty list with a `warning` if the key is missing or the fetch fails.
+- `GET /voice` — the resolved `active` voice, the `persisted` UI choice, and the `env_default`.
+- `PUT /voice` `{"voice_id": "..."}` — persist the active voice; an empty string clears it (falls back to the env default).
+
+Resolution precedence per session: `?voice=` on the WebSocket connect URL → persisted UI choice → `ELEVENLABS_VOICE_ID`.
 
 Proactive conversation tuning:
 

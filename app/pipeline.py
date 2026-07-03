@@ -45,6 +45,7 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from app.config import Settings
 from app.pipeline_memory import MemoryInjectionProcessor, maybe_distill_context
+from app.voice_settings import resolve_active_voice_id
 
 logger = logging.getLogger("voice_agent.pipecat")
 
@@ -170,6 +171,7 @@ def build_session_task(
     transport: FastAPIWebsocketTransport,
     settings: Settings,
     character_id: str | None = None,
+    voice_id: str | None = None,
 ) -> tuple[PipelineTask, LLMContext]:
     """Wire STT/LLM/TTS, aggregators, and idle/greeting handlers onto a transport.
 
@@ -205,7 +207,7 @@ def build_session_task(
         sample_rate=settings.elevenlabs_sample_rate,
         settings=ElevenLabsTTSService.Settings(
             model=settings.elevenlabs_model,
-            voice=settings.elevenlabs_voice_id,
+            voice=resolve_active_voice_id(settings, override=voice_id),
             stability=settings.elevenlabs_stability,
             similarity_boost=settings.elevenlabs_similarity_boost,
             style=settings.elevenlabs_style,
@@ -297,7 +299,7 @@ def build_session_task(
 
 
 async def run_pipecat_session(
-    websocket, settings: Settings, character_id: str | None = None
+    websocket, settings: Settings, character_id: str | None = None, voice_id: str | None = None
 ) -> None:
     """Build and run a Pipecat pipeline against an accepted browser WebSocket."""
 
@@ -311,7 +313,9 @@ async def run_pipecat_session(
         ),
     )
 
-    task, context = build_session_task(transport, settings, character_id=character_id)
+    task, context = build_session_task(
+        transport, settings, character_id=character_id, voice_id=voice_id
+    )
     runner = PipelineRunner(handle_sigint=False)
     try:
         await runner.run(task)

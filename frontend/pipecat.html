@@ -53,6 +53,24 @@
       }
       select:disabled { opacity: 0.45; cursor: not-allowed; }
 
+      input[type="text"] {
+        font: inherit;
+        padding: 0.5rem 0.75rem;
+        background: var(--panel);
+        color: var(--ink);
+        border: 1px solid var(--hairline);
+        border-radius: 8px;
+        min-width: 220px;
+      }
+      input[type="text"]::placeholder { color: var(--muted); }
+      .voicebar { align-items: center; }
+      .voicelabel {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+      }
+      .voicestatus { font-size: 12px; color: var(--muted); }
+      .voicestatus[data-ok="true"] { color: var(--accent); }
+      .voicestatus[data-ok="error"] { color: var(--error); }
+
       .linkbtn {
         font: inherit;
         padding: 0.5rem 1rem;
@@ -171,6 +189,16 @@
       <a class="linkbtn" href="/classic">Classic UI</a>
     </div>
 
+    <div class="controls voicebar">
+      <span class="voicelabel">Voice</span>
+      <select id="voiceSelect" title="ElevenLabs voice">
+        <option value="">env default</option>
+      </select>
+      <input type="text" id="voicePaste" placeholder="or paste a voice id" />
+      <button id="voiceSave">Save voice</button>
+      <span class="voicestatus" id="voiceStatus"></span>
+    </div>
+
     <div class="pills">
       <span class="pill" id="connPill" data-on="false">
         <span class="dot"></span><span id="connLabel">disconnected</span>
@@ -225,6 +253,10 @@
       const transcriptEmpty = document.getElementById("transcriptEmpty");
       const transcriptPartial = document.getElementById("transcriptPartial");
       const characterSelect = document.getElementById("characterSelect");
+      const voiceSelect = document.getElementById("voiceSelect");
+      const voicePaste = document.getElementById("voicePaste");
+      const voiceSave = document.getElementById("voiceSave");
+      const voiceStatus = document.getElementById("voiceStatus");
 
       // --- Log ---
       function log(...args) {
@@ -381,6 +413,73 @@
       }
       loadCharacters();
 
+      // --- Voice picker (ElevenLabs) ---
+      function setVoiceStatus(text, ok = "") {
+        voiceStatus.textContent = text || "";
+        voiceStatus.dataset.ok = ok;
+      }
+
+      // The voice used on connect: a pasted id wins, else the dropdown choice.
+      function chosenVoice() {
+        return (voicePaste.value || "").trim() || voiceSelect.value || "";
+      }
+
+      async function loadVoices() {
+        try {
+          const res = await fetch("/voices");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const voices = data.voices || [];
+          voiceSelect.innerHTML = '<option value="">env default</option>';
+          for (const v of voices) {
+            const opt = document.createElement("option");
+            opt.value = v.voice_id;
+            opt.textContent = v.category ? `${v.name} (${v.category})` : v.name;
+            if (v.voice_id === data.active) opt.selected = true;
+            voiceSelect.appendChild(opt);
+          }
+          // If the active voice isn't in the fetched list (e.g. a pasted id or no
+          // library access), surface it as a selected custom option.
+          if (data.active && ![...voiceSelect.options].some((o) => o.value === data.active)) {
+            const opt = document.createElement("option");
+            opt.value = data.active;
+            opt.textContent = `${data.active} (custom)`;
+            opt.selected = true;
+            voiceSelect.appendChild(opt);
+          }
+          if (data.warning) {
+            setVoiceStatus(data.warning, "error");
+          } else {
+            setVoiceStatus(data.active ? `active: ${data.active}` : "using env default", "true");
+          }
+        } catch (e) {
+          setVoiceStatus(`voices load failed: ${e?.message ?? e}`, "error");
+        }
+      }
+      loadVoices();
+
+      voiceSave.addEventListener("click", async () => {
+        const voice_id = chosenVoice();
+        voiceSave.disabled = true;
+        setVoiceStatus("saving…");
+        try {
+          const res = await fetch("/voice", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ voice_id }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          voicePaste.value = "";
+          await loadVoices();
+          setVoiceStatus(data.active ? `saved — active: ${data.active}` : "cleared — using env default", "true");
+        } catch (e) {
+          setVoiceStatus(`save failed: ${e?.message ?? e}`, "error");
+        } finally {
+          voiceSave.disabled = false;
+        }
+      });
+
       // --- Pipecat client ---
       const wsScheme = location.protocol === "https:" ? "wss" : "ws";
       const wsUrl = `${wsScheme}://${location.host}/api/ws`;
@@ -508,8 +607,12 @@
         statusEl.textContent = "connecting...";
         setPill(connPill, connLabel, "false", "connecting");
         try {
-          const character = characterSelect.value;
-          const url = character ? `${wsUrl}?character=${encodeURIComponent(character)}` : wsUrl;
+          const params = new URLSearchParams();
+          if (characterSelect.value) params.set("character", characterSelect.value);
+          const voice = chosenVoice();
+          if (voice) params.set("voice", voice);
+          const qs = params.toString();
+          const url = qs ? `${wsUrl}?${qs}` : wsUrl;
           await client.connect({ ws_url: url });
           disconnectBtn.disabled = false;
         } catch (e) {

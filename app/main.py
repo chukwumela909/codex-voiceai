@@ -21,6 +21,7 @@ from app.events import CLIENT_EVENT_TYPES, PLANNED_EVENT_TYPES, SERVER_EVENT_TYP
 from app.exceptions import ClientConnectionClosed
 from app.mock_conversation import MockConversationSession
 from app.preview import preview_character
+from app.voice_settings import get_active_voice_id, resolve_active_voice_id, set_active_voice_id
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -151,12 +152,15 @@ async def pipecat_ws(websocket: WebSocket) -> None:
     await websocket.accept()
     session_id = new_session_id()
     requested_character = websocket.query_params.get("character")
+    requested_voice = websocket.query_params.get("voice")
     log_info("pipecat ws client connected", session_id=session_id)
 
     from app.pipeline import run_pipecat_session
 
     try:
-        await run_pipecat_session(websocket, settings, character_id=requested_character)
+        await run_pipecat_session(
+            websocket, settings, character_id=requested_character, voice_id=requested_voice
+        )
     except WebSocketDisconnect:
         log_info("pipecat ws client disconnected", session_id=session_id)
     except Exception:
@@ -311,6 +315,56 @@ async def preview_character_endpoint(payload: dict) -> dict:
         raise HTTPException(status_code=400, detail="preview requires a character object.")
     character = _coerce_preview_character(char_data)
     return await preview_character(character, message, settings)
+
+
+@app.get("/voices")
+async def list_voices_endpoint() -> dict:
+    """List the account's ElevenLabs voices for the UI picker + report the active one.
+
+    Never raises for provider problems: a missing key or a fetch failure returns
+    an empty list plus a warning, so the paste-a-voice-id path still works.
+    """
+    from app.elevenlabs_tts import list_voices
+
+    voices: list[dict] = []
+    warning: str | None = None
+    if settings.elevenlabs_api_key:
+        try:
+            voices = await list_voices(settings.elevenlabs_api_key)
+        except Exception as exc:  # noqa: BLE001 — surface as a warning, not a 500
+            warning = f"Could not load ElevenLabs voices: {exc}"
+    else:
+        warning = "ELEVENLABS_API_KEY is not configured; paste a voice id manually."
+    return {
+        "voices": voices,
+        "active": resolve_active_voice_id(settings),
+        "persisted": get_active_voice_id(),
+        "env_default": settings.elevenlabs_voice_id,
+        "warning": warning,
+    }
+
+
+@app.get("/voice")
+async def get_voice_endpoint() -> dict:
+    return {
+        "active": resolve_active_voice_id(settings),
+        "persisted": get_active_voice_id(),
+        "env_default": settings.elevenlabs_voice_id,
+    }
+
+
+@app.put("/voice")
+async def set_voice_endpoint(payload: dict) -> dict:
+    """Persist the active ElevenLabs voice id chosen in the UI (empty string clears it)."""
+    raw = payload.get("voice_id", None)
+    if raw is not None and not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="voice_id must be a string.")
+    stored = set_active_voice_id(raw)
+    return {
+        "active": resolve_active_voice_id(settings),
+        "persisted": stored,
+        "env_default": settings.elevenlabs_voice_id,
+    }
 
 
 @app.get("/memory")

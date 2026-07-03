@@ -13,6 +13,7 @@ from app.config import Settings
 from app.elevenlabs_tts import ElevenLabsStreamingTTS
 from app.groq_agent import GroqStreamingAgent
 from app.mock_conversation import generate_mock_pcm
+from app.voice_settings import resolve_active_voice_id
 
 MOCK_SAMPLE_RATE = 16000
 MOCK_MIN_SECONDS = 0.4
@@ -23,7 +24,7 @@ def _usable_elevenlabs(settings: Settings) -> bool:
     return bool(
         settings.normalized_mode == "live"
         and settings.elevenlabs_api_key
-        and settings.elevenlabs_voice_id
+        and resolve_active_voice_id(settings)
     )
 
 
@@ -89,7 +90,7 @@ async def preview_character(character: Character, message: str, settings: Settin
         synthesizer = ElevenLabsStreamingTTS(
             api_key=settings.elevenlabs_api_key,
             model_id=settings.elevenlabs_model,
-            voice_id=settings.elevenlabs_voice_id,
+            voice_id=resolve_active_voice_id(settings),
             sample_rate=settings.elevenlabs_sample_rate,
             stability=settings.elevenlabs_stability,
             similarity_boost=settings.elevenlabs_similarity_boost,

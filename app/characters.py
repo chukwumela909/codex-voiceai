@@ -7,8 +7,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.speech_tags import EMOTION_LABELS
-
 
 CHARACTERS_DIR = Path(__file__).parent / "characters"
 DEFAULT_CHARACTER_ID = "zara"
@@ -92,9 +90,6 @@ def build_system_prompt(character: Character) -> str:
         )
         lines.append("")
 
-    lines.extend(_ssml_guidance_lines())
-    lines.append("")
-
     if character.example_exchanges:
         lines.append("Example style:")
         for ex in character.example_exchanges:
@@ -108,22 +103,6 @@ def build_system_prompt(character: Character) -> str:
         lines.append("")
 
     return "\n".join(lines).strip() + "\n"
-
-
-def _ssml_guidance_lines() -> list[str]:
-    emotion_menu = ", ".join(EMOTION_LABELS)
-    return [
-        "Speech direction (inline tags the voice engine understands):",
-        '- <break time="200ms"/> — insert a natural pause. Use for breath, hesitation, or to let a thought land. Time in ms or s.',
-        f'- <emotion value="LABEL"/> — shift emotional tone for the words that follow. Pick LABEL from: {emotion_menu}.',
-        "- <spell>TEXT</spell> — read TEXT letter-by-letter. Use for acronyms, codes, or anything that should not be pronounced as a word.",
-        "When to reach for them:",
-        "- Use sparingly and only when meaning calls for it — emotional shifts, suspense, a beat before a punchline, a breath after a long clause.",
-        "- Do not pepper every sentence; if a turn already feels alive, leave it alone.",
-        "- Keep each tag self-contained within one sentence. Do not let a paired tag span a sentence boundary.",
-        "- Do not narrate stage directions in words (\"laughs\", \"pauses\"); use the tag.",
-        "- Only use the tags listed above. Do not invent new tags or attributes.",
-    ]
 
 
 def load_characters(directory: Path | None = None) -> dict[str, Character]:

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
 from app.elevenlabs_tts import ElevenLabsStreamingTTS, generate_context_id
+from app.voice_settings import resolve_active_voice_id
 from app.conversation_context import (
     agent_transcript_with_context,
     agent_transcript_with_intent_inference,
@@ -979,11 +980,15 @@ class MockConversationSession:
             event("pipeline.stage", self.session_id, {"stage": "tts_done", "provider": "mock", **metadata})
         )
 
+    def _active_voice_id(self) -> str | None:
+        # Prefer the UI-selected (persisted) voice, else the env default.
+        return resolve_active_voice_id(self.settings)
+
     def _has_usable_elevenlabs_config(self) -> bool:
         return bool(
             self.settings.normalized_mode == "live"
             and self.settings.elevenlabs_api_key
-            and self.settings.elevenlabs_voice_id
+            and self._active_voice_id()
         )
 
     def _ensure_synthesizer(self) -> None:
@@ -992,7 +997,7 @@ class MockConversationSession:
         self.synthesizer = ElevenLabsStreamingTTS(
             api_key=self.settings.elevenlabs_api_key,
             model_id=self.settings.elevenlabs_model,
-            voice_id=self.settings.elevenlabs_voice_id,
+            voice_id=self._active_voice_id(),
             sample_rate=self.settings.elevenlabs_sample_rate,
             stability=self.settings.elevenlabs_stability,
             similarity_boost=self.settings.elevenlabs_similarity_boost,

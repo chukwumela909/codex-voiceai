@@ -5,7 +5,10 @@ from contextlib import asynccontextmanager
 from urllib.parse import quote
 from uuid import uuid4
 
+import httpx
 import websockets
+
+VOICES_URL = "https://api.elevenlabs.io/v1/voices"
 
 # Buffer thresholds (in characters) at which ElevenLabs flushes generation. The
 # low first value keeps time-to-first-audio short on short replies; later values
@@ -301,3 +304,29 @@ def parse_elevenlabs_message(raw_message: str | bytes, *, context_id: str | None
 
 def generate_context_id(response_id: str) -> str:
     return response_id.replace("resp_", "ctx_", 1)
+
+
+async def list_voices(api_key: str, *, timeout: float = 10.0) -> list[dict]:
+    """Fetch the account's ElevenLabs voice library for the UI voice picker.
+
+    Returns a simplified ``[{voice_id, name, category}]`` list. Raises on HTTP or
+    transport errors so the caller can surface the failure.
+    """
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(VOICES_URL, headers={"xi-api-key": api_key})
+        response.raise_for_status()
+        data = response.json()
+
+    voices: list[dict] = []
+    for voice in data.get("voices", []):
+        voice_id = voice.get("voice_id")
+        if not voice_id:
+            continue
+        voices.append(
+            {
+                "voice_id": voice_id,
+                "name": voice.get("name") or voice_id,
+                "category": voice.get("category"),
+            }
+        )
+    return voices
