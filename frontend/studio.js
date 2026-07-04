@@ -8,7 +8,35 @@
     tone: { el: "listTone", kind: "string" },
     speaking_style_rules: { el: "listRules", kind: "string" },
     forbidden_phrases: { el: "listForbidden", kind: "string" },
-    example_exchanges: { el: "listExamples", kind: "pair" },
+    values: { el: "listValues", kind: "string" },
+    likes: { el: "listLikes", kind: "string" },
+    dislikes: { el: "listDislikes", kind: "string" },
+    boundaries: { el: "listBoundaries", kind: "string" },
+    caller_goals: { el: "listGoals", kind: "string" },
+    example_exchanges: {
+      el: "listExamples",
+      kind: "pair",
+      pair: [
+        { key: "user", ph: "User says…" },
+        { key: "assistant", ph: "Character replies…" },
+      ],
+    },
+    profile_facts: {
+      el: "listFacts",
+      kind: "pair",
+      pair: [
+        { key: "label", ph: "Label (e.g. Age)" },
+        { key: "value", ph: "Value (e.g. 47)" },
+      ],
+    },
+    stories: {
+      el: "listStories",
+      kind: "pair",
+      pair: [
+        { key: "title", ph: "Title (e.g. The band)" },
+        { key: "content", ph: "What happened" },
+      ],
+    },
   };
 
   const $ = (id) => document.getElementById(id);
@@ -110,24 +138,21 @@
   }
 
   function addPairRow(field, value = {}) {
-    const container = $(LIST_FIELDS[field].el);
+    const cfg = LIST_FIELDS[field];
+    const container = $(cfg.el);
     const row = document.createElement("div");
     row.className = "list-rows__row list-rows__row--pair";
-    const user = document.createElement("input");
-    user.type = "text";
-    user.placeholder = "User says…";
-    user.value = value.user || "";
-    user.dataset.role = "user";
-    user.addEventListener("input", markDirty);
-    const assistant = document.createElement("input");
-    assistant.type = "text";
-    assistant.placeholder = "Character replies…";
-    assistant.value = value.assistant || "";
-    assistant.dataset.role = "assistant";
-    assistant.addEventListener("input", markDirty);
     const pair = document.createElement("div");
     pair.className = "list-rows__pair";
-    pair.append(user, assistant);
+    cfg.pair.forEach(({ key, ph }) => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = ph;
+      input.value = value[key] || "";
+      input.dataset.role = key;
+      input.addEventListener("input", markDirty);
+      pair.appendChild(input);
+    });
     row.append(pair, makeRowControls(container, row));
     container.appendChild(row);
     return row;
@@ -146,12 +171,16 @@
     const container = $(LIST_FIELDS[field].el);
     const rows = [...container.querySelectorAll(".list-rows__row")];
     if (LIST_FIELDS[field].kind === "pair") {
+      const keys = LIST_FIELDS[field].pair.map((p) => p.key);
       return rows
-        .map((r) => ({
-          user: r.querySelector('[data-role="user"]').value.trim(),
-          assistant: r.querySelector('[data-role="assistant"]').value.trim(),
-        }))
-        .filter((p) => p.user || p.assistant);
+        .map((r) => {
+          const obj = {};
+          keys.forEach((k) => {
+            obj[k] = r.querySelector(`[data-role="${k}"]`).value.trim();
+          });
+          return obj;
+        })
+        .filter((obj) => keys.some((k) => obj[k]));
     }
     return rows.map((r) => r.querySelector('[data-role="value"]').value.trim()).filter(Boolean);
   }
@@ -163,6 +192,9 @@
     $("fRole").value = char.role || "";
     $("fGrammar").value = char.grammar || "";
     $("fIdentity").value = char.identity_response_style || "";
+    $("fBackstory").value = char.backstory || "";
+    $("fCallerRelationship").value = char.caller_relationship || "";
+    $("fConversationSetting").value = char.conversation_setting || "";
     for (const field of Object.keys(LIST_FIELDS)) {
       clearList(field);
       const values = char[field] || [];
@@ -176,9 +208,19 @@
       role: $("fRole").value.trim(),
       grammar: $("fGrammar").value.trim(),
       identity_response_style: $("fIdentity").value.trim(),
+      backstory: $("fBackstory").value.trim(),
+      caller_relationship: $("fCallerRelationship").value.trim(),
+      conversation_setting: $("fConversationSetting").value.trim(),
       tone: readList("tone"),
       speaking_style_rules: readList("speaking_style_rules"),
       forbidden_phrases: readList("forbidden_phrases"),
+      values: readList("values"),
+      likes: readList("likes"),
+      dislikes: readList("dislikes"),
+      boundaries: readList("boundaries"),
+      caller_goals: readList("caller_goals"),
+      profile_facts: readList("profile_facts"),
+      stories: readList("stories"),
       example_exchanges: readList("example_exchanges"),
     };
     if (state.currentId) char.id = state.currentId;
@@ -405,7 +447,9 @@
 
     document.querySelectorAll("[data-add]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        addRow(btn.dataset.add, btn.dataset.add === "example_exchanges" ? {} : "");
+        const field = btn.dataset.add;
+        const isPair = LIST_FIELDS[field] && LIST_FIELDS[field].kind === "pair";
+        addRow(field, isPair ? {} : "");
         markDirty();
       });
     });

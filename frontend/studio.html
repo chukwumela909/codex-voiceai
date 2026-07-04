@@ -11,7 +11,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;500&family=Inter:wght@400;500;600&display=swap"
     />
-    <link rel="stylesheet" href="/static/styles.css?v=studio.1" />
+    <link rel="stylesheet" href="/static/styles.css?v=studio.2" />
   </head>
   <body class="studio-body">
     <header class="topbar">
@@ -59,9 +59,80 @@
             <textarea id="fRole" rows="2" required></textarea>
           </label>
 
+          <h2 class="editor__section">Life &amp; backstory</h2>
+          <p class="editor__section-hint">
+            The fixed facts of this person's life. The more you fill in, the less the
+            voice improvises — and the less it contradicts itself.
+          </p>
+
+          <label class="field">
+            <span class="field__label">Backstory</span>
+            <textarea id="fBackstory" rows="5" placeholder="A short narrative of who this person is, written as &quot;you&quot; — e.g. You're James Lay, 47, from Burleson, Texas…"></textarea>
+          </label>
+
+          <div class="field" data-list="profile_facts">
+            <span class="field__label">Key facts <span class="field__hint">label → value; never contradicted</span></span>
+            <div class="list-rows list-rows--pairs" id="listFacts"></div>
+            <button type="button" class="btn btn--ghost btn--xs" data-add="profile_facts">+ Add fact</button>
+          </div>
+
+          <div class="field" data-list="values">
+            <span class="field__label">Values</span>
+            <div class="list-rows" id="listValues"></div>
+            <button type="button" class="btn btn--ghost btn--xs" data-add="values">+ Add value</button>
+          </div>
+
+          <div class="field" data-list="likes">
+            <span class="field__label">Likes</span>
+            <div class="list-rows" id="listLikes"></div>
+            <button type="button" class="btn btn--ghost btn--xs" data-add="likes">+ Add like</button>
+          </div>
+
+          <div class="field" data-list="dislikes">
+            <span class="field__label">Dislikes</span>
+            <div class="list-rows" id="listDislikes"></div>
+            <button type="button" class="btn btn--ghost btn--xs" data-add="dislikes">+ Add dislike</button>
+          </div>
+
+          <div class="field" data-list="stories">
+            <span class="field__label">Stories <span class="field__hint">title → what happened; told only when it fits</span></span>
+            <div class="list-rows list-rows--pairs" id="listStories"></div>
+            <button type="button" class="btn btn--ghost btn--xs" data-add="stories">+ Add story</button>
+          </div>
+
+          <div class="field" data-list="boundaries">
+            <span class="field__label">Boundaries <span class="field__hint">topics to deflect or keep private</span></span>
+            <div class="list-rows" id="listBoundaries"></div>
+            <button type="button" class="btn btn--ghost btn--xs" data-add="boundaries">+ Add boundary</button>
+          </div>
+
+          <h2 class="editor__section">Caller &amp; relationship</h2>
+          <p class="editor__section-hint">
+            Who this person is talking to, and why — this sets how open or guarded they are.
+          </p>
+
+          <label class="field">
+            <span class="field__label">Who you're talking to</span>
+            <textarea id="fCallerRelationship" rows="3" placeholder="e.g. Someone you're getting to know on the phone — treat them like a friend you're catching up with."></textarea>
+          </label>
+
+          <label class="field">
+            <span class="field__label">Conversation setting</span>
+            <textarea id="fConversationSetting" rows="2" placeholder="e.g. A relaxed phone call with no set agenda."></textarea>
+          </label>
+
+          <div class="field" data-list="caller_goals">
+            <span class="field__label">Goals for the call</span>
+            <div class="list-rows" id="listGoals"></div>
+            <button type="button" class="btn btn--ghost btn--xs" data-add="caller_goals">+ Add goal</button>
+          </div>
+
+          <h2 class="editor__section">Voice &amp; style</h2>
+          <p class="editor__section-hint">How this person sounds and talks.</p>
+
           <label class="field">
             <span class="field__label">Grammar / speaking style</span>
-            <input type="text" id="fGrammar" placeholder="e.g. casual American gen-z english" />
+            <input type="text" id="fGrammar" placeholder="e.g. relaxed, natural American English with a Texas everyman feel" />
           </label>
 
           <div class="field" data-list="tone">
@@ -115,6 +186,6 @@
       </aside>
     </main>
 
-    <script src="/static/studio.js?v=studio.1"></script>
+    <script src="/static/studio.js?v=studio.2"></script>
   </body>
 </html>

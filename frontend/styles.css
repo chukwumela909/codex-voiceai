@@ -1144,6 +1144,16 @@ body[data-app-state="active"] .dock__hint {
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field__label { font-size: 0.78rem; font-weight: 600; color: var(--body-strong); }
 .field__req { color: var(--semantic-error); }
+.field__hint { font-weight: 400; color: var(--muted); font-size: 0.72rem; }
+.editor__section {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--body-strong);
+  margin: var(--sm) 0 0;
+  padding-top: var(--base);
+  border-top: 1px solid var(--hairline);
+}
+.editor__section-hint { font-size: 0.78rem; color: var(--muted); margin: -2px 0 4px; }
 .editor input[type="text"],
 .editor textarea,
 .studio__preview textarea {

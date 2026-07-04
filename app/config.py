@@ -91,7 +91,7 @@ class Settings(BaseSettings):
         ),
         alias="VOICE_AGENT_PERSONA",
     )
-    default_character_id: str = Field(default="zara", alias="VOICE_AGENT_DEFAULT_CHARACTER")
+    default_character_id: str = Field(default="jimmy", alias="VOICE_AGENT_DEFAULT_CHARACTER")
     intent_inference_enabled: bool = Field(default=True, alias="VOICE_AGENT_INTENT_INFERENCE_ENABLED")
     ambience_enabled: bool = Field(default=True, alias="VOICE_AGENT_AMBIENCE_ENABLED")
     ambience_scene: str = Field(default="room_line", alias="VOICE_AGENT_AMBIENCE_SCENE")

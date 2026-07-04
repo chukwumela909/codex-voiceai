@@ -21,25 +21,25 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_zara_character_loads_from_disk():
+def test_jimmy_character_loads_from_disk():
     chars = load_characters()
-    assert "zara" in chars
-    zara = chars["zara"]
+    assert "jimmy" in chars
+    jimmy = chars["jimmy"]
     # name is user-editable via the Studio; assert it is set, not a fixed value.
-    assert zara.name
-    assert "warm" in zara.tone
-    assert any("as an AI" in p for p in zara.forbidden_phrases)
+    assert jimmy.name
+    assert "warm" in jimmy.tone
+    assert any("as an AI" in p for p in jimmy.forbidden_phrases)
 
 
 def test_build_system_prompt_includes_key_contract_pieces():
-    zara = load_characters()["zara"]
-    prompt = build_system_prompt(zara)
-    assert f"You are {zara.name}." in prompt
+    jimmy = load_characters()["jimmy"]
+    prompt = build_system_prompt(jimmy)
+    assert f"You are {jimmy.name}." in prompt
     assert "stay in character" in prompt
     assert "Do not claim to be human" in prompt
-    for phrase in zara.forbidden_phrases:
+    for phrase in jimmy.forbidden_phrases:
         assert phrase in prompt
-    for tone in zara.tone:
+    for tone in jimmy.tone:
         assert tone in prompt
 
 
@@ -62,13 +62,13 @@ def test_get_character_falls_back_to_default():
     assert found.id in {"zara", characters_mod.DEFAULT_CHARACTER_ID}
 
 
-def test_get_characters_endpoint_returns_zara_default():
+def test_get_characters_endpoint_returns_jimmy_default():
     response = client.get("/characters")
     assert response.status_code == 200
     body = response.json()
-    assert body["default"] == "zara"
+    assert body["default"] == "jimmy"
     ids = {c["id"] for c in body["characters"]}
-    assert "zara" in ids
+    assert "jimmy" in ids
 
 
 def test_put_character_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -216,9 +216,83 @@ def test_character_select_event_swaps_character():
         sent.append(payload)
 
     session = MockConversationSession("sess_test", send, get_settings())
-    assert session.character.id == "zara"
+    assert session.character.id == "jimmy"
 
     new_char = session.set_character("neutral")
     assert new_char.id == "neutral"
     # Cached agent should be cleared so the next _ensure_agent rebuilds with new prompt.
     assert session.agent is None
+
+
+def test_build_system_prompt_includes_life_canon():
+    char = Character(
+        id="demo",
+        name="Demo",
+        role="test person",
+        backstory="You're Demo, a fictional test person.",
+        profile_facts=[{"label": "Age", "value": "40"}, {"label": "City", "value": "Austin"}],
+        likes=["tacos"],
+        dislikes=["drama"],
+        values=["honesty"],
+        stories=[{"title": "The move", "content": "Moved to Austin in his twenties."}],
+        boundaries=["Never discuss the weather"],
+        caller_relationship="An old friend calling to catch up.",
+        conversation_setting="A relaxed evening phone call.",
+        caller_goals=["Catch up warmly"],
+    )
+    prompt = build_system_prompt(char)
+    assert "You're Demo, a fictional test person." in prompt
+    assert "Age: 40" in prompt
+    assert "City: Austin" in prompt
+    assert "tacos" in prompt
+    assert "drama" in prompt
+    assert "honesty" in prompt
+    assert "The move: Moved to Austin in his twenties." in prompt
+    assert "Never discuss the weather" in prompt
+    assert "An old friend calling to catch up." in prompt
+    assert "A relaxed evening phone call." in prompt
+    assert "Catch up warmly" in prompt
+    # The anti-drift grounding rule appears whenever there is life canon to stay true to.
+    assert "Stay grounded" in prompt
+
+
+def test_build_system_prompt_omits_canon_block_when_absent():
+    # A style-only character (no life canon) must not get the grounding directive
+    # or empty canon headers.
+    char = Character(id="bare", name="Bare", role="assistant")
+    prompt = build_system_prompt(char)
+    assert "Stay grounded" not in prompt
+    assert "Key facts about your life" not in prompt
+    # The base identity contract is still present.
+    assert "You are Bare." in prompt
+    assert "Do not claim to be human" in prompt
+
+
+def test_new_canon_fields_round_trip_through_rest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(characters_mod, "CHARACTERS_DIR", tmp_path)
+    save_character(Character(id="jimmy", name="Jimmy", role="seed"), directory=tmp_path)
+
+    payload = {
+        "name": "Jimmy",
+        "role": "a guy on the phone",
+        "backstory": "You're Jimmy, 47.",
+        "profile_facts": [{"label": "Age", "value": "47"}],
+        "likes": ["tacos"],
+        "dislikes": ["drama"],
+        "values": ["trust"],
+        "stories": [{"title": "The band", "content": "Joined as a teen."}],
+        "boundaries": ["Don't discuss dad"],
+        "caller_relationship": "A friend.",
+        "conversation_setting": "A call.",
+        "caller_goals": ["Be good company"],
+    }
+    put = client.put("/characters/jimmy", json=payload)
+    assert put.status_code == 200, put.text
+
+    saved = next(c for c in client.get("/characters").json()["characters"] if c["id"] == "jimmy")
+    assert saved["backstory"] == "You're Jimmy, 47."
+    assert saved["profile_facts"] == [{"label": "Age", "value": "47"}]
+    assert saved["stories"] == [{"title": "The band", "content": "Joined as a teen."}]
+    assert saved["boundaries"] == ["Don't discuss dad"]
+    assert saved["caller_relationship"] == "A friend."
+    assert saved["caller_goals"] == ["Be good company"]
