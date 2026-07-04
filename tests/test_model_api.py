@@ -59,11 +59,50 @@ def test_put_empty_model_clears_and_falls_back_to_default(monkeypatch, isolated_
     assert cleared["active"] == "groq-llama-3.1-8b"
 
 
-def test_put_unknown_model_is_rejected(monkeypatch, isolated_model_dir):
+def test_put_bare_word_model_is_rejected(monkeypatch, isolated_model_dir):
     monkeypatch.setattr(main_mod, "settings", Settings(_env_file=None))
 
+    # No slash and not a preset key -> not a usable model id.
     resp = client.put("/model", json={"model": "not-a-real-model"})
     assert resp.status_code == 400
+
+
+def test_put_raw_openrouter_slug_is_accepted(monkeypatch, isolated_model_dir):
+    monkeypatch.setattr(main_mod, "settings", Settings(_env_file=None))
+
+    put = client.put("/model", json={"model": "anthropic/claude-sonnet-4.5"}).json()
+    assert put["active"] == "anthropic/claude-sonnet-4.5"
+    assert put["persisted"] == "anthropic/claude-sonnet-4.5"
+    # /models still lists the curated presets; active reflects the pasted slug.
+    listing = client.get("/models").json()
+    assert listing["active"] == "anthropic/claude-sonnet-4.5"
+
+
+def test_openrouter_catalog_endpoint(monkeypatch, isolated_model_dir):
+    monkeypatch.setattr(
+        main_mod, "settings", Settings(_env_file=None, OPENROUTER_API_KEY="k")
+    )
+
+    async def fake_catalog(api_key=None, **kwargs):
+        return [{"id": "anthropic/claude-sonnet-4.5", "name": "Claude Sonnet 4.5"}]
+
+    monkeypatch.setattr(llm_models, "list_openrouter_models", fake_catalog)
+
+    body = client.get("/openrouter/models").json()
+    assert body["models"][0]["id"] == "anthropic/claude-sonnet-4.5"
+    assert body["warning"] is None
+
+
+def test_openrouter_catalog_warns_without_key(monkeypatch, isolated_model_dir):
+    monkeypatch.setattr(main_mod, "settings", Settings(_env_file=None))
+
+    async def fake_catalog(api_key=None, **kwargs):
+        return [{"id": "openai/gpt-4o-mini", "name": "GPT-4o mini"}]
+
+    monkeypatch.setattr(llm_models, "list_openrouter_models", fake_catalog)
+
+    body = client.get("/openrouter/models").json()
+    assert "OPENROUTER_API_KEY" in body["warning"]
 
 
 def test_put_model_rejects_non_string(monkeypatch, isolated_model_dir):

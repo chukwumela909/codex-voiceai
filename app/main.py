@@ -25,7 +25,7 @@ from app.voice_settings import get_active_voice_id, resolve_active_voice_id, set
 from app.llm_models import (
     MODELS,
     get_active_model,
-    resolve_active_model_key,
+    resolve_model,
     set_active_model,
 )
 from fastapi import HTTPException
@@ -379,13 +379,12 @@ async def set_voice_endpoint(payload: dict) -> dict:
 
 
 def _model_status_payload() -> dict:
-    active = resolve_active_model_key(settings)
     return {
         "models": [
             {"key": k, "label": v["label"], "provider": v["provider"], "model": v["model"]}
             for k, v in MODELS.items()
         ],
-        "active": active,
+        "active": resolve_model(settings)["key"],
         "persisted": get_active_model(),
         "default": settings.default_model,
         "openrouter_configured": bool(settings.openrouter_api_key),
@@ -394,13 +393,33 @@ def _model_status_payload() -> dict:
 
 @app.get("/models")
 async def list_models_endpoint() -> dict:
-    """List the switchable LLM models (Groq + OpenRouter) plus the active one.
+    """List the curated LLM presets (Groq + OpenRouter) plus the active model.
 
     Feeds the UI model picker; the `key` is what the browser sends as ?model= on
-    connect. `openrouter_configured` is false when OPENROUTER_API_KEY is unset, so
-    the UI can warn that OpenRouter entries won't work yet.
+    connect (a preset key or a raw OpenRouter slug). `openrouter_configured` is
+    false when OPENROUTER_API_KEY is unset, so the UI can warn that OpenRouter
+    models won't work yet.
     """
     return _model_status_payload()
+
+
+@app.get("/openrouter/models")
+async def list_openrouter_catalog_endpoint() -> dict:
+    """OpenRouter's full model catalog for the UI autocomplete/paste field.
+
+    Lets you pick or paste ANY OpenRouter model id, not just the curated presets.
+    Never raises: a fetch failure returns an empty list plus a warning.
+    """
+    from app.llm_models import list_openrouter_models
+
+    warning: str | None = None
+    if not settings.openrouter_api_key:
+        warning = "OPENROUTER_API_KEY is not set; models will error until you add it."
+    try:
+        catalog = await list_openrouter_models(settings.openrouter_api_key)
+    except Exception as exc:  # noqa: BLE001 — surface as a warning, not a 500
+        return {"models": [], "warning": f"Could not load OpenRouter catalog: {exc}"}
+    return {"models": catalog, "warning": warning}
 
 
 @app.put("/model")

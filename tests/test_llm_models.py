@@ -7,7 +7,9 @@ from app.llm_models import (
     build_llm_service,
     default_model_key,
     get_active_model,
+    model_entry_for,
     resolve_active_model_key,
+    resolve_model,
     set_active_model,
 )
 
@@ -91,3 +93,48 @@ def test_all_models_have_required_fields():
     for key, entry in MODELS.items():
         assert entry["provider"] in ("groq", "openrouter")
         assert entry["label"] and entry["model"]
+
+
+# --- raw OpenRouter slugs (pick any / paste a model id) --------------------
+
+def test_model_entry_for_preset_slug_and_unknown():
+    s = _settings()
+    assert model_entry_for("or-gpt-4o-mini", s)["provider"] == "openrouter"
+    assert model_entry_for("groq-llama-3.1-8b", s)["provider"] == "groq"
+
+    slug = model_entry_for("anthropic/claude-sonnet-4.5", s)
+    assert slug["provider"] == "openrouter"
+    assert slug["model"] == "anthropic/claude-sonnet-4.5"
+    assert slug["key"] == "anthropic/claude-sonnet-4.5"
+
+    assert model_entry_for("bogus-no-slash", s) is None
+    assert model_entry_for("", s) is None
+
+
+def test_set_and_resolve_raw_slug(tmp_path):
+    assert set_active_model("anthropic/claude-sonnet-4.5", directory=tmp_path) == "anthropic/claude-sonnet-4.5"
+    entry = resolve_model(_settings(), directory=tmp_path)
+    assert entry["provider"] == "openrouter"
+    assert entry["model"] == "anthropic/claude-sonnet-4.5"
+
+
+def test_set_rejects_bare_word_but_accepts_slug(tmp_path):
+    with pytest.raises(ValueError):
+        set_active_model("just-a-word", directory=tmp_path)
+    assert set_active_model("vendor/model", directory=tmp_path) == "vendor/model"
+
+
+def test_build_llm_service_raw_slug_uses_openrouter():
+    svc = build_llm_service(_settings(), "anthropic/claude-sonnet-4.5")
+    assert type(svc).__name__ == "OpenAILLMService"
+
+
+def test_build_llm_service_raw_slug_requires_key():
+    with pytest.raises(RuntimeError):
+        build_llm_service(_settings(openrouter_api_key=None), "anthropic/claude-sonnet-4.5")
+
+
+def test_default_model_can_be_a_raw_slug(tmp_path):
+    settings = _settings(default_model="anthropic/claude-sonnet-4.5")
+    entry = resolve_model(settings, directory=tmp_path)  # empty dir → falls to default
+    assert entry["model"] == "anthropic/claude-sonnet-4.5"

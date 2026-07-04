@@ -43,7 +43,7 @@ from pipecat.turns.user_stop import (
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from app.config import Settings
-from app.llm_models import MODELS, build_llm_service, resolve_active_model_key
+from app.llm_models import build_llm_service, resolve_model
 from app.pipeline_memory import MemoryInjectionProcessor, maybe_distill_context
 from app.voice_settings import resolve_active_voice_id
 
@@ -191,14 +191,14 @@ def build_session_task(
     )
 
     # The LLM is chosen per session from the UI (?model=), else the persisted/default
-    # model — see app/llm_models.py MODELS (Groq direct or an OpenRouter model).
-    model_key = resolve_active_model_key(settings, override=model_id)
-    llm = build_llm_service(settings, model_key)
+    # model — a curated preset (app/llm_models.py MODELS) or any OpenRouter slug.
+    model_entry = resolve_model(settings, override=model_id)
+    llm = build_llm_service(settings, model_entry["key"])
     logger.info(
         "pipeline llm model=%s (%s:%s)",
-        model_key,
-        MODELS[model_key]["provider"],
-        MODELS[model_key]["model"],
+        model_entry["key"],
+        model_entry["provider"],
+        model_entry["model"],
     )
 
     tts = ElevenLabsTTSService(

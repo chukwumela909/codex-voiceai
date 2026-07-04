@@ -258,13 +258,13 @@ class Settings(BaseSettings):
         return []
 
     def _llm_status(self) -> dict:
-        from app.llm_models import MODELS, resolve_active_model_key
+        from app.llm_models import MODELS, resolve_model
 
-        active = resolve_active_model_key(self)
+        entry = resolve_model(self)
         return {
-            "active_model": active,
-            "provider": MODELS[active]["provider"],
-            "model": MODELS[active]["model"],
+            "active_model": entry["key"],
+            "provider": entry["provider"],
+            "model": entry["model"],
             "openrouter_configured": bool(self.openrouter_api_key),
             "available": list(MODELS.keys()),
         }

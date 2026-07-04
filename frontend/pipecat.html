@@ -201,9 +201,11 @@
 
     <div class="controls voicebar">
       <span class="voicelabel">Model</span>
-      <select id="modelSelect" title="LLM model (Groq / OpenRouter)">
+      <select id="modelSelect" title="LLM presets (Groq / OpenRouter)">
         <option value="">loading…</option>
       </select>
+      <input type="text" id="modelPaste" list="orModels" placeholder="or any OpenRouter id (e.g. anthropic/claude-sonnet-4.5)" />
+      <datalist id="orModels"></datalist>
       <button id="modelSave">Save model</button>
       <span class="voicestatus" id="modelStatus"></span>
     </div>
@@ -267,6 +269,8 @@
       const voiceSave = document.getElementById("voiceSave");
       const voiceStatus = document.getElementById("voiceStatus");
       const modelSelect = document.getElementById("modelSelect");
+      const modelPaste = document.getElementById("modelPaste");
+      const orModels = document.getElementById("orModels");
       const modelSave = document.getElementById("modelSave");
       const modelStatus = document.getElementById("modelStatus");
 
@@ -498,6 +502,12 @@
         modelStatus.dataset.ok = ok;
       }
 
+      // The model used on save/connect: a pasted/typed OpenRouter id wins, else
+      // the selected preset. Either a preset key or a raw "vendor/model" slug.
+      function chosenModel() {
+        return (modelPaste.value || "").trim() || modelSelect.value || "";
+      }
+
       async function loadModels() {
         try {
           const res = await fetch("/models");
@@ -512,6 +522,14 @@
             if (m.key === data.active) opt.selected = true;
             modelSelect.appendChild(opt);
           }
+          // Active model isn't a preset (a pasted OpenRouter slug) — show it selected.
+          if (data.active && ![...modelSelect.options].some((o) => o.value === data.active)) {
+            const opt = document.createElement("option");
+            opt.value = data.active;
+            opt.textContent = `${data.active} (custom)`;
+            opt.selected = true;
+            modelSelect.appendChild(opt);
+          }
           if (!data.openrouter_configured) {
             setModelStatus("active: " + data.active + " · set OPENROUTER_API_KEY to use OpenRouter models", "error");
           } else {
@@ -523,19 +541,44 @@
       }
       loadModels();
 
+      // Populate the paste field's autocomplete with OpenRouter's full catalog, so
+      // you can pick ANY model by id (not just the presets) or type your own.
+      async function loadOpenRouterCatalog() {
+        try {
+          const res = await fetch("/openrouter/models");
+          if (!res.ok) return;
+          const data = await res.json();
+          orModels.innerHTML = "";
+          for (const m of data.models || []) {
+            const opt = document.createElement("option");
+            opt.value = m.id;
+            opt.label = m.name && m.name !== m.id ? m.name : m.id;
+            orModels.appendChild(opt);
+          }
+        } catch {
+          /* catalog is optional autocomplete — ignore failures */
+        }
+      }
+      loadOpenRouterCatalog();
+
       modelSave.addEventListener("click", async () => {
+        const model = chosenModel();
         modelSave.disabled = true;
         setModelStatus("saving…");
         try {
           const res = await fetch("/model", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: modelSelect.value }),
+            body: JSON.stringify({ model }),
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (!res.ok) {
+            const detail = await res.json().catch(() => ({}));
+            throw new Error(detail.detail || `HTTP ${res.status}`);
+          }
           const data = await res.json();
+          modelPaste.value = "";
           await loadModels();
-          setModelStatus(`saved — active: ${data.active}`, "true");
+          setModelStatus(data.active ? `saved — active: ${data.active}` : "cleared — using default", "true");
         } catch (e) {
           setModelStatus(`save failed: ${e?.message ?? e}`, "error");
         } finally {
@@ -674,7 +717,8 @@
           if (characterSelect.value) params.set("character", characterSelect.value);
           const voice = chosenVoice();
           if (voice) params.set("voice", voice);
-          if (modelSelect.value) params.set("model", modelSelect.value);
+          const model = chosenModel();
+          if (model) params.set("model", model);
           const qs = params.toString();
           const url = qs ? `${wsUrl}?${qs}` : wsUrl;
           await client.connect({ ws_url: url });

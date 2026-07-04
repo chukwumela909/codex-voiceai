@@ -107,6 +107,8 @@ The Pipecat page has a **Model** picker so you can switch the LLM on a live call
 - **Groq** — direct, lowest latency (free tier). Needs `GROQ_API_KEY`.
 - **OpenRouter** — one key, many models (Claude, GPT-4o-mini, Gemini, Llama…). Needs `OPENROUTER_API_KEY`; without it the OpenRouter entries won't work and the picker says so.
 
+Beyond the curated presets, you can pick or paste **any OpenRouter model id** (e.g. `anthropic/claude-sonnet-4.5`) in the model bar's text field — it autocompletes from OpenRouter's live catalog (`GET /openrouter/models`). A value with a `/` is treated as a raw OpenRouter slug; a value without one must be a preset key.
+
 The choice persists server-side (`data/active_model`) and applies to browser and phone calls. `enable_metrics=True` is on, so each model's **TTFB is logged** in the bot console (watch for `OpenAILLMService#0 TTFB: …`) — that's your measurement.
 
 Endpoints:

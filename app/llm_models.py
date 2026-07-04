@@ -19,6 +19,7 @@ from pathlib import Path
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
 MODEL_STATE_DIR = Path("data")
 ACTIVE_MODEL_FILE = "active_model"
@@ -34,10 +35,15 @@ MODELS: dict[str, dict] = {
         "provider": "groq",
         "model": "llama-3.3-70b-versatile",
     },
-    "or-claude-3.5-sonnet": {
-        "label": "OpenRouter · Claude 3.5 Sonnet",
+    "or-claude-haiku-4.5": {
+        "label": "OpenRouter · Claude Haiku 4.5 (fast)",
         "provider": "openrouter",
-        "model": "anthropic/claude-3.5-sonnet",
+        "model": "anthropic/claude-haiku-4.5",
+    },
+    "or-claude-sonnet-4.5": {
+        "label": "OpenRouter · Claude Sonnet 4.5",
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-4.5",
     },
     "or-gpt-4o-mini": {
         "label": "OpenRouter · GPT-4o mini",
@@ -69,32 +75,61 @@ def _model_path(directory: Path | None = None) -> Path:
     return (directory or MODEL_STATE_DIR) / ACTIVE_MODEL_FILE
 
 
+def is_openrouter_slug(value: str | None) -> bool:
+    # OpenRouter model ids are always "vendor/model"; preset keys never contain "/".
+    return bool(value) and "/" in value
+
+
+def model_entry_for(value: str | None, settings=None) -> dict | None:
+    """Map a ?model= value to a full entry, or None if it isn't usable.
+
+    A value is either a curated preset key (in MODELS) or a raw OpenRouter model
+    slug like ``anthropic/claude-sonnet-4.5`` (any id from OpenRouter's catalog,
+    typed/pasted in the UI). Slugs are treated as OpenRouter models.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    if value in MODELS:
+        return {"key": value, **MODELS[value]}
+    if is_openrouter_slug(value):
+        return {
+            "key": value,
+            "label": f"OpenRouter · {value}",
+            "provider": "openrouter",
+            "model": value,
+        }
+    return None
+
+
 def get_active_model(directory: Path | None = None) -> str | None:
-    """Read the persisted active model key, or None if unset/unknown/unreadable."""
+    """Read the persisted active model (preset key or OpenRouter slug), or None."""
     try:
         text = _model_path(directory).read_text(encoding="utf-8").strip()
     except OSError:
         return None
-    return text if text in MODELS else None
+    return text or None
 
 
-def set_active_model(model_key: str | None, directory: Path | None = None) -> str | None:
-    """Persist the active model key atomically (must be a known key).
-
-    Empty/None clears the selection so resolution falls back to the default.
-    Returns the stored key, or None if cleared.
+def set_active_model(model: str | None, directory: Path | None = None) -> str | None:
+    """Persist the active model atomically. Accepts a preset key or an OpenRouter
+    slug (``vendor/model``). Empty/None clears the selection. Returns the stored
+    value, or None if cleared. Raises ValueError on an unusable value.
     """
     base = directory or MODEL_STATE_DIR
     path = _model_path(base)
-    normalized = (model_key or "").strip()
+    normalized = (model or "").strip()
     if not normalized:
         try:
             path.unlink()
         except OSError:
             pass
         return None
-    if normalized not in MODELS:
-        raise ValueError(f"Unknown model key: {normalized!r}")
+    if normalized not in MODELS and not is_openrouter_slug(normalized):
+        raise ValueError(
+            f"Unknown model {normalized!r}: use a preset key or an OpenRouter slug "
+            "like 'anthropic/claude-sonnet-4.5'."
+        )
     base.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{ACTIVE_MODEL_FILE}.tmp")
     tmp.write_text(normalized, encoding="utf-8")
@@ -102,20 +137,27 @@ def set_active_model(model_key: str | None, directory: Path | None = None) -> st
     return normalized
 
 
+def resolve_model(
+    settings, *, override: str | None = None, directory: Path | None = None
+) -> dict:
+    """Resolve the model entry to use: per-session override -> persisted -> default."""
+    for candidate in (override, get_active_model(directory), getattr(settings, "default_model", None)):
+        entry = model_entry_for(candidate, settings)
+        if entry:
+            return entry
+    key = default_model_key(settings)
+    return {"key": key, **MODELS[key]}
+
+
 def resolve_active_model_key(
     settings, *, override: str | None = None, directory: Path | None = None
 ) -> str:
-    """Resolve which model to use: per-session override -> persisted -> default."""
-    if override and override.strip() in MODELS:
-        return override.strip()
-    persisted = get_active_model(directory)
-    if persisted:
-        return persisted
-    return default_model_key(settings)
+    """Convenience: the resolved model's key/slug (see resolve_model)."""
+    return resolve_model(settings, override=override, directory=directory)["key"]
 
 
-def build_llm_service(settings, model_key: str):
-    """Construct the Pipecat LLM service for a model key (Groq or via OpenRouter).
+def build_llm_service(settings, model: str):
+    """Construct the Pipecat LLM service for a model (preset key or OpenRouter slug).
 
     Both providers use Pipecat's OpenAI-compatible ``OpenAILLMService`` with a
     different base URL + key, so the rest of the pipeline is provider-agnostic.
@@ -124,7 +166,10 @@ def build_llm_service(settings, model_key: str):
     """
     from pipecat.services.openai.llm import OpenAILLMService
 
-    entry = MODELS.get(model_key) or MODELS[default_model_key(settings)]
+    entry = model_entry_for(model, settings)
+    if entry is None:
+        key = default_model_key(settings)
+        entry = {"key": key, **MODELS[key]}
 
     llm_settings = OpenAILLMService.Settings(
         model=entry["model"],
@@ -145,3 +190,27 @@ def build_llm_service(settings, model_key: str):
     return OpenAILLMService(
         api_key=settings.groq_api_key, base_url=GROQ_BASE_URL, settings=llm_settings
     )
+
+
+async def list_openrouter_models(api_key: str | None = None, *, timeout: float = 10.0) -> list[dict]:
+    """Fetch OpenRouter's model catalog for the UI picker/autocomplete.
+
+    Returns ``[{id, name}]`` sorted by id. The catalog endpoint is public; the key
+    is sent when present. Raises on HTTP/transport errors so the caller can warn.
+    """
+    import httpx
+
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.get(OPENROUTER_MODELS_URL, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+    models: list[dict] = []
+    for entry in data.get("data", []):
+        mid = entry.get("id")
+        if not mid:
+            continue
+        models.append({"id": mid, "name": entry.get("name") or mid})
+    models.sort(key=lambda m: m["id"])
+    return models
