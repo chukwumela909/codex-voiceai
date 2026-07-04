@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     deepgram_api_key: str | None = Field(default=None, alias="DEEPGRAM_API_KEY")
     groq_api_key: str | None = Field(default=None, alias="GROQ_API_KEY")
+    openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
     elevenlabs_api_key: str | None = Field(default=None, alias="ELEVENLABS_API_KEY")
 
     deepgram_model: str = Field(default="nova-3", alias="DEEPGRAM_MODEL")
@@ -66,6 +67,9 @@ class Settings(BaseSettings):
     # per-turn token cost so a long call doesn't keep re-sending the full
     # transcript (which exhausts Groq's TPM budget and stalls replies). 0 = unbounded.
     llm_context_max_turns: int = Field(default=12, ge=0, alias="VOICE_AGENT_LLM_CONTEXT_MAX_TURNS")
+    # Which LLM answers by default (a key in app/llm_models.py MODELS). The UI model
+    # picker overrides this per session via ?model=. Groq or an OpenRouter model.
+    default_model: str = Field(default="groq-llama-3.1-8b", alias="DEFAULT_MODEL")
     elevenlabs_model: str = Field(default="eleven_flash_v2_5", alias="ELEVENLABS_MODEL")
     elevenlabs_speed: float = Field(default=1.0, alias="ELEVENLABS_SPEED")
     elevenlabs_voice_id: str | None = Field(default=None, alias="ELEVENLABS_VOICE_ID")
@@ -253,6 +257,18 @@ class Settings(BaseSettings):
         # format to validate here. Kept for the health-report contract.
         return []
 
+    def _llm_status(self) -> dict:
+        from app.llm_models import MODELS, resolve_active_model_key
+
+        active = resolve_active_model_key(self)
+        return {
+            "active_model": active,
+            "provider": MODELS[active]["provider"],
+            "model": MODELS[active]["model"],
+            "openrouter_configured": bool(self.openrouter_api_key),
+            "available": list(MODELS.keys()),
+        }
+
     def public_config_status(self) -> dict:
         missing = self.missing_live_keys() if self.normalized_mode == "live" else []
         invalid = self.invalid_live_keys() if self.normalized_mode == "live" else []
@@ -281,6 +297,7 @@ class Settings(BaseSettings):
             "conversation": {
                 "intent_inference_enabled": self.intent_inference_enabled,
             },
+            "llm": self._llm_status(),
             "memory": {
                 "configured": self.normalized_memory_enabled,
                 "enabled": self.memory_effective_enabled,

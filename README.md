@@ -100,6 +100,21 @@ Endpoints:
 
 Resolution precedence per session: `?voice=` on the WebSocket connect URL → persisted UI choice → `ELEVENLABS_VOICE_ID`.
 
+### Choosing an LLM model (performance A/B)
+
+The Pipecat page has a **Model** picker so you can switch the LLM on a live call and compare latency/quality. Two providers behind one OpenAI-compatible interface (see `app/llm_models.py` `MODELS`):
+
+- **Groq** — direct, lowest latency (free tier). Needs `GROQ_API_KEY`.
+- **OpenRouter** — one key, many models (Claude, GPT-4o-mini, Gemini, Llama…). Needs `OPENROUTER_API_KEY`; without it the OpenRouter entries won't work and the picker says so.
+
+The choice persists server-side (`data/active_model`) and applies to browser and phone calls. `enable_metrics=True` is on, so each model's **TTFB is logged** in the bot console (watch for `OpenAILLMService#0 TTFB: …`) — that's your measurement.
+
+Endpoints:
+- `GET /models` — the switchable list + `active` + whether OpenRouter is configured.
+- `PUT /model` `{"model": "<key>"}` — persist the active model (empty string clears to the default).
+
+Resolution precedence per session: `?model=` on connect → persisted UI choice → `DEFAULT_MODEL` env (a key in `MODELS`).
+
 Proactive conversation tuning:
 
 - `VOICE_AGENT_PROACTIVE_ENABLED`: `auto`, `true`, or `false`. `auto` enables proactive behavior in mock mode and keeps live mode opt-in.

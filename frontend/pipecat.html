@@ -199,6 +199,15 @@
       <span class="voicestatus" id="voiceStatus"></span>
     </div>
 
+    <div class="controls voicebar">
+      <span class="voicelabel">Model</span>
+      <select id="modelSelect" title="LLM model (Groq / OpenRouter)">
+        <option value="">loading…</option>
+      </select>
+      <button id="modelSave">Save model</button>
+      <span class="voicestatus" id="modelStatus"></span>
+    </div>
+
     <div class="pills">
       <span class="pill" id="connPill" data-on="false">
         <span class="dot"></span><span id="connLabel">disconnected</span>
@@ -257,6 +266,9 @@
       const voicePaste = document.getElementById("voicePaste");
       const voiceSave = document.getElementById("voiceSave");
       const voiceStatus = document.getElementById("voiceStatus");
+      const modelSelect = document.getElementById("modelSelect");
+      const modelSave = document.getElementById("modelSave");
+      const modelStatus = document.getElementById("modelStatus");
 
       // --- Log ---
       function log(...args) {
@@ -480,6 +492,57 @@
         }
       });
 
+      // --- Model picker (LLM: Groq / OpenRouter, for performance A/B) ---
+      function setModelStatus(text, ok = "") {
+        modelStatus.textContent = text || "";
+        modelStatus.dataset.ok = ok;
+      }
+
+      async function loadModels() {
+        try {
+          const res = await fetch("/models");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const models = data.models || [];
+          modelSelect.innerHTML = "";
+          for (const m of models) {
+            const opt = document.createElement("option");
+            opt.value = m.key;
+            opt.textContent = m.label;
+            if (m.key === data.active) opt.selected = true;
+            modelSelect.appendChild(opt);
+          }
+          if (!data.openrouter_configured) {
+            setModelStatus("active: " + data.active + " · set OPENROUTER_API_KEY to use OpenRouter models", "error");
+          } else {
+            setModelStatus("active: " + data.active, "true");
+          }
+        } catch (e) {
+          setModelStatus(`models load failed: ${e?.message ?? e}`, "error");
+        }
+      }
+      loadModels();
+
+      modelSave.addEventListener("click", async () => {
+        modelSave.disabled = true;
+        setModelStatus("saving…");
+        try {
+          const res = await fetch("/model", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: modelSelect.value }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          await loadModels();
+          setModelStatus(`saved — active: ${data.active}`, "true");
+        } catch (e) {
+          setModelStatus(`save failed: ${e?.message ?? e}`, "error");
+        } finally {
+          modelSave.disabled = false;
+        }
+      });
+
       // --- Pipecat client ---
       const wsScheme = location.protocol === "https:" ? "wss" : "ws";
       const wsUrl = `${wsScheme}://${location.host}/api/ws`;
@@ -611,6 +674,7 @@
           if (characterSelect.value) params.set("character", characterSelect.value);
           const voice = chosenVoice();
           if (voice) params.set("voice", voice);
+          if (modelSelect.value) params.set("model", modelSelect.value);
           const qs = params.toString();
           const url = qs ? `${wsUrl}?${qs}` : wsUrl;
           await client.connect({ ws_url: url });

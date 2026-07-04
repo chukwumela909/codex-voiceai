@@ -31,7 +31,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -44,6 +43,7 @@ from pipecat.turns.user_stop import (
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from app.config import Settings
+from app.llm_models import MODELS, build_llm_service, resolve_active_model_key
 from app.pipeline_memory import MemoryInjectionProcessor, maybe_distill_context
 from app.voice_settings import resolve_active_voice_id
 
@@ -100,7 +100,6 @@ class ContextWindowProcessor(FrameProcessor):
                 )
         await self.push_frame(frame, direction)
 
-GROQ_OPENAI_BASE_URL = "https://api.groq.com/openai/v1"
 IDLE_NUDGE_INSTRUCTION = (
     "The caller has gone quiet. Offer one brief, warm check-in to let them know "
     "you're still on the line. Keep it under 18 words and do not ask why they went silent."
@@ -172,6 +171,7 @@ def build_session_task(
     settings: Settings,
     character_id: str | None = None,
     voice_id: str | None = None,
+    model_id: str | None = None,
 ) -> tuple[PipelineTask, LLMContext]:
     """Wire STT/LLM/TTS, aggregators, and idle/greeting handlers onto a transport.
 
@@ -190,16 +190,15 @@ def build_session_task(
         ),
     )
 
-    llm_settings = OpenAILLMService.Settings(
-        model=settings.groq_model,
-        temperature=settings.groq_temperature,
-    )
-    if settings.groq_max_tokens > 0:
-        llm_settings.max_completion_tokens = settings.groq_max_tokens
-    llm = OpenAILLMService(
-        api_key=settings.groq_api_key,
-        base_url=GROQ_OPENAI_BASE_URL,
-        settings=llm_settings,
+    # The LLM is chosen per session from the UI (?model=), else the persisted/default
+    # model — see app/llm_models.py MODELS (Groq direct or an OpenRouter model).
+    model_key = resolve_active_model_key(settings, override=model_id)
+    llm = build_llm_service(settings, model_key)
+    logger.info(
+        "pipeline llm model=%s (%s:%s)",
+        model_key,
+        MODELS[model_key]["provider"],
+        MODELS[model_key]["model"],
     )
 
     tts = ElevenLabsTTSService(
@@ -299,7 +298,11 @@ def build_session_task(
 
 
 async def run_pipecat_session(
-    websocket, settings: Settings, character_id: str | None = None, voice_id: str | None = None
+    websocket,
+    settings: Settings,
+    character_id: str | None = None,
+    voice_id: str | None = None,
+    model_id: str | None = None,
 ) -> None:
     """Build and run a Pipecat pipeline against an accepted browser WebSocket."""
 
@@ -314,7 +317,7 @@ async def run_pipecat_session(
     )
 
     task, context = build_session_task(
-        transport, settings, character_id=character_id, voice_id=voice_id
+        transport, settings, character_id=character_id, voice_id=voice_id, model_id=model_id
     )
     runner = PipelineRunner(handle_sigint=False)
     try:

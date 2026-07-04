@@ -22,6 +22,12 @@ from app.exceptions import ClientConnectionClosed
 from app.mock_conversation import MockConversationSession
 from app.preview import preview_character
 from app.voice_settings import get_active_voice_id, resolve_active_voice_id, set_active_voice_id
+from app.llm_models import (
+    MODELS,
+    get_active_model,
+    resolve_active_model_key,
+    set_active_model,
+)
 from fastapi import HTTPException
 from pydantic import ValidationError
 
@@ -153,13 +159,18 @@ async def pipecat_ws(websocket: WebSocket) -> None:
     session_id = new_session_id()
     requested_character = websocket.query_params.get("character")
     requested_voice = websocket.query_params.get("voice")
+    requested_model = websocket.query_params.get("model")
     log_info("pipecat ws client connected", session_id=session_id)
 
     from app.pipeline import run_pipecat_session
 
     try:
         await run_pipecat_session(
-            websocket, settings, character_id=requested_character, voice_id=requested_voice
+            websocket,
+            settings,
+            character_id=requested_character,
+            voice_id=requested_voice,
+            model_id=requested_model,
         )
     except WebSocketDisconnect:
         log_info("pipecat ws client disconnected", session_id=session_id)
@@ -365,6 +376,44 @@ async def set_voice_endpoint(payload: dict) -> dict:
         "persisted": stored,
         "env_default": settings.elevenlabs_voice_id,
     }
+
+
+def _model_status_payload() -> dict:
+    active = resolve_active_model_key(settings)
+    return {
+        "models": [
+            {"key": k, "label": v["label"], "provider": v["provider"], "model": v["model"]}
+            for k, v in MODELS.items()
+        ],
+        "active": active,
+        "persisted": get_active_model(),
+        "default": settings.default_model,
+        "openrouter_configured": bool(settings.openrouter_api_key),
+    }
+
+
+@app.get("/models")
+async def list_models_endpoint() -> dict:
+    """List the switchable LLM models (Groq + OpenRouter) plus the active one.
+
+    Feeds the UI model picker; the `key` is what the browser sends as ?model= on
+    connect. `openrouter_configured` is false when OPENROUTER_API_KEY is unset, so
+    the UI can warn that OpenRouter entries won't work yet.
+    """
+    return _model_status_payload()
+
+
+@app.put("/model")
+async def set_model_endpoint(payload: dict) -> dict:
+    """Persist the active LLM model chosen in the UI (empty string clears it)."""
+    raw = payload.get("model", None)
+    if raw is not None and not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="model must be a string.")
+    try:
+        set_active_model(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _model_status_payload()
 
 
 @app.get("/memory")
