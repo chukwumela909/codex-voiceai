@@ -63,6 +63,29 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
+@app.on_event("startup")
+async def warm_pipecat_pipeline() -> None:
+    """Pre-warm the Pipecat stack so the first caller doesn't pay the cold start.
+
+    The pipecat/transformers/onnxruntime imports plus the smart-turn ONNX model
+    load take multiple seconds; without this the first `/api/ws` or Twilio
+    session sits in dead air while they happen (and stalls any concurrent
+    session's audio). Best-effort: a legacy-only deploy without the pipecat
+    extras still boots.
+    """
+
+    def _warm() -> None:
+        from app.pipeline import create_turn_analyzer
+
+        create_turn_analyzer(settings)
+
+    try:
+        await asyncio.to_thread(_warm)
+        log_info("pipecat pipeline warmed (imports + smart-turn model)")
+    except Exception as exc:  # noqa: BLE001 — warmup must never block startup
+        logger.warning("pipecat warmup skipped: %s", exc)
+
+
 def log_info(message: str, session_id: str = "-", **extra: object) -> None:
     logger.info(message, extra={"session_id": session_id, **extra})
 

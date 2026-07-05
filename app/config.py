@@ -52,7 +52,10 @@ class Settings(BaseSettings):
     vad_stop_secs: float = Field(default=0.2, gt=0, alias="VOICE_AGENT_VAD_STOP_SECS")
     vad_min_volume: float = Field(default=0.6, ge=0.0, le=1.0, alias="VOICE_AGENT_VAD_MIN_VOLUME")
     smart_turn_enabled: bool = Field(default=True, alias="VOICE_AGENT_SMART_TURN_ENABLED")
-    smart_turn_stop_secs: float = Field(default=3.0, gt=0, alias="VOICE_AGENT_SMART_TURN_STOP_SECS")
+    # Max silence the smart-turn model may hold a turn open when it judges the
+    # pause mid-thought. This bounds worst-case dead air on a misclassification
+    # (silence + LLM + TTS all stack on top), so keep it well under 3s.
+    smart_turn_stop_secs: float = Field(default=2.0, gt=0, alias="VOICE_AGENT_SMART_TURN_STOP_SECS")
     speech_timeout_stop_secs: float = Field(
         default=0.8, gt=0, alias="VOICE_AGENT_SPEECH_TIMEOUT_STOP_SECS"
     )
@@ -73,7 +76,9 @@ class Settings(BaseSettings):
     elevenlabs_model: str = Field(default="eleven_flash_v2_5", alias="ELEVENLABS_MODEL")
     elevenlabs_speed: float = Field(default=1.0, alias="ELEVENLABS_SPEED")
     elevenlabs_voice_id: str | None = Field(default=None, alias="ELEVENLABS_VOICE_ID")
-    elevenlabs_sample_rate: int = Field(default=16000, alias="ELEVENLABS_SAMPLE_RATE")
+    # 24 kHz sounds noticeably more present in the browser; Twilio output is
+    # pinned to 8 kHz at the transport regardless, so this only helps.
+    elevenlabs_sample_rate: int = Field(default=24000, alias="ELEVENLABS_SAMPLE_RATE")
     elevenlabs_stability: float = Field(default=0.5, ge=0.0, le=1.0, alias="ELEVENLABS_STABILITY")
     elevenlabs_similarity_boost: float = Field(default=0.8, ge=0.0, le=1.0, alias="ELEVENLABS_SIMILARITY_BOOST")
     elevenlabs_style: float = Field(default=0.0, ge=0.0, le=1.0, alias="ELEVENLABS_STYLE")

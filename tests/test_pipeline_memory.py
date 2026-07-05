@@ -12,12 +12,14 @@ import pytest
 
 from app.pipeline import window_context_messages
 from app.pipeline_memory import (
+    CALL_SUMMARY_MARKER,
     MEMORY_MARKER,
     MemoryInjectionProcessor,
     context_to_transcript,
     extract_text,
     latest_user_text,
     maybe_distill_context,
+    summarize_dropped_turns,
     upsert_memory_message,
 )
 
@@ -191,3 +193,69 @@ def test_distill_skipped_when_transcript_empty(monkeypatch: pytest.MonkeyPatch):
         )
     )
     assert manager.transcripts == []
+
+
+def test_distill_includes_archived_turns_before_current_context(monkeypatch: pytest.MonkeyPatch):
+    # The context window trims the shared context in place; without the archive
+    # a long call would distill only its final minutes.
+    manager = StubManager()
+    monkeypatch.setattr("app.memory.build_manager", lambda s: manager)
+    archived = [
+        {"role": "user", "content": "my name is Sam"},
+        {"role": "assistant", "content": "good to meet you, Sam"},
+    ]
+    asyncio.run(
+        maybe_distill_context(
+            FakeContext(_convo()), StubSettings(enabled=True), archived_messages=archived
+        )
+    )
+    assert manager.transcripts == [
+        [
+            {"role": "user", "content": "my name is Sam"},
+            {"role": "assistant", "content": "good to meet you, Sam"},
+            {"role": "user", "content": "hi there"},
+            {"role": "assistant", "content": "hello!"},
+        ]
+    ]
+
+
+# ---- rolling summary --------------------------------------------------------
+
+
+class _SummarySettings:
+    """Offline settings: mock mode forces the deterministic heuristic path."""
+
+    normalized_mode = "mock"
+    groq_api_key = None
+    groq_model = "test"
+
+
+def test_rolling_summary_heuristic_digests_turns():
+    turns = [
+        {"role": "user", "content": "I play drums"},
+        {"role": "assistant", "content": "no way, me too"},
+    ]
+    out = asyncio.run(summarize_dropped_turns(_SummarySettings(), "", turns))
+    assert "Caller: I play drums" in out
+    assert "You: no way, me too" in out
+
+
+def test_rolling_summary_is_cumulative_and_bounded():
+    settings = _SummarySettings()
+    summary = ""
+    for i in range(60):
+        turns = [{"role": "user", "content": f"turn number {i} with some words"}]
+        summary = asyncio.run(summarize_dropped_turns(settings, summary, turns))
+    assert len(summary) <= 720  # bounded, keeps the tail
+    assert "turn number 59" in summary
+
+
+def test_rolling_summary_empty_turns_returns_previous():
+    assert asyncio.run(summarize_dropped_turns(_SummarySettings(), "prev", [])) == "prev"
+
+
+def test_call_summary_marker_upserts_like_memory_block():
+    out = upsert_memory_message(_convo(), "the gist so far", marker=CALL_SUMMARY_MARKER)
+    assert out[1]["role"] == "system"
+    assert out[1]["content"].startswith(CALL_SUMMARY_MARKER)
+    assert "the gist so far" in out[1]["content"]

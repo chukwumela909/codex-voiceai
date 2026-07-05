@@ -24,7 +24,20 @@ logger = logging.getLogger("voice_agent.pipecat.memory")
 # Doubles as the marker that identifies the injected system message for
 # replacement on later turns, so it must stay a stable prefix.
 MEMORY_MARKER = "Long-term memory about this caller:"
+# Marker for the rolling in-call summary that replaces turns dropped by the
+# context window, so the persona doesn't develop mid-call amnesia.
+CALL_SUMMARY_MARKER = "Earlier in this call (older turns, summarized):"
 DISTILL_TIMEOUT_SECONDS = 20.0
+SUMMARY_TIMEOUT_SECONDS = 10.0
+_SUMMARY_MAX_CHARS = 700
+
+_ROLLING_SUMMARY_INSTRUCTION = (
+    "You maintain a running summary of an ongoing phone call, written for the "
+    "assistant speaking on the call. Merge the previous summary with the new "
+    "turns into ONE updated summary of at most 3 short sentences. Keep concrete "
+    "facts the caller shared (name, people, plans, preferences) and anything "
+    "the assistant promised or claimed about itself. Return ONLY the summary text."
+)
 
 
 def extract_text(content: object) -> str:
@@ -73,6 +86,68 @@ def upsert_memory_message(
         prefix_len += 1
     memory_message = {"role": "system", "content": f"{marker}\n{block.strip()}"}
     return result[:prefix_len] + [memory_message] + result[prefix_len:]
+
+
+def _heuristic_rolling_summary(prev_summary: str, turns: list[dict]) -> str:
+    """Offline/deterministic fallback: keep the tail of a plain-text digest."""
+    lines: list[str] = []
+    if prev_summary.strip():
+        lines.append(prev_summary.strip())
+    for turn in turns:
+        role = turn.get("role")
+        text = extract_text(turn.get("content")).strip()
+        if role in ("user", "assistant") and text:
+            speaker = "Caller" if role == "user" else "You"
+            lines.append(f"{speaker}: {text}")
+    digest = " ".join(lines)
+    if len(digest) > _SUMMARY_MAX_CHARS:
+        digest = "… " + digest[-_SUMMARY_MAX_CHARS:].lstrip()
+    return digest
+
+
+async def summarize_dropped_turns(settings, prev_summary: str, turns: list[dict]) -> str:
+    """Fold turns trimmed out of the context window into a rolling summary.
+
+    Uses the Groq LLM in live mode (small, off the frame path); anything else —
+    mock mode, missing key, timeout, HTTP failure — degrades to a deterministic
+    text digest so the summary never silently disappears.
+    """
+    if not turns:
+        return prev_summary
+    if not (settings.normalized_mode == "live" and getattr(settings, "groq_api_key", None)):
+        return _heuristic_rolling_summary(prev_summary, turns)
+
+    convo = "\n".join(
+        f"{t.get('role', '')}: {extract_text(t.get('content')).strip()}" for t in turns
+    )
+    user_block = (
+        f"Previous summary:\n{prev_summary.strip() or '(none)'}\n\nNew turns:\n{convo}"
+    )
+    payload = {
+        "model": settings.groq_model,
+        "messages": [
+            {"role": "system", "content": _ROLLING_SUMMARY_INSTRUCTION},
+            {"role": "user", "content": user_block},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 160,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=SUMMARY_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.groq_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            summary = response.json()["choices"][0]["message"]["content"].strip()
+        return summary or _heuristic_rolling_summary(prev_summary, turns)
+    except Exception:
+        logger.exception("rolling summary LLM call failed; using heuristic digest")
+        return _heuristic_rolling_summary(prev_summary, turns)
 
 
 def context_to_transcript(messages: list[dict]) -> list[dict[str, str]]:
@@ -146,16 +221,22 @@ class MemoryInjectionProcessor(FrameProcessor):
             self._refreshing = False
 
 
-async def maybe_distill_context(context: LLMContext, settings) -> None:
+async def maybe_distill_context(
+    context: LLMContext, settings, archived_messages: list[dict] | None = None
+) -> None:
     """Distill the session transcript into long-term memory at session end.
 
-    Bounded and best-effort so a slow or failing distillation can never hang
-    session teardown.
+    ``archived_messages`` are turns the context window trimmed during the call
+    (the shared context is mutated in place, so without them a long call would
+    distill only its final minutes). Bounded and best-effort so a slow or
+    failing distillation can never hang session teardown.
     """
     if not getattr(settings, "memory_effective_enabled", False):
         return
     try:
-        transcript = context_to_transcript(context.get_messages())
+        transcript = context_to_transcript(
+            list(archived_messages or []) + context.get_messages()
+        )
         if not transcript:
             return
         from app.memory import build_manager

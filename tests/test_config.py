@@ -133,7 +133,7 @@ def test_balanced_fast_voice_timing_defaults(monkeypatch):
         },
         "smart_turn": {
             "enabled": True,
-            "stop_secs": 3.0,
+            "stop_secs": 2.0,
         },
         "speech_timeout_stop_secs": 0.8,
         "interruption_min_words": 2,
@@ -171,11 +171,12 @@ def test_elevenlabs_voice_settings_reported_in_public_config(monkeypatch):
     monkeypatch.delenv("ELEVENLABS_STYLE", raising=False)
     monkeypatch.delenv("ELEVENLABS_USE_SPEAKER_BOOST", raising=False)
     monkeypatch.delenv("ELEVENLABS_SPEED", raising=False)
+    monkeypatch.delenv("ELEVENLABS_SAMPLE_RATE", raising=False)
 
     status = Settings(_env_file=None).public_config_status()
 
     assert status["elevenlabs"]["model"] == "eleven_flash_v2_5"
-    assert status["elevenlabs"]["sample_rate"] == 16000
+    assert status["elevenlabs"]["sample_rate"] == 24000
     assert status["elevenlabs"]["voice_settings"] == {
         "stability": 0.5,
         "similarity_boost": 0.8,

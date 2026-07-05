@@ -15,7 +15,10 @@ OpenRouter ids are its model slugs (https://openrouter.ai/models).
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger("voice_agent.llm_models")
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
@@ -34,6 +37,14 @@ MODELS: dict[str, dict] = {
         "label": "Groq · Llama 3.3 70B",
         "provider": "groq",
         "model": "llama-3.3-70b-versatile",
+    },
+    # Groq serves Llama 4 Maverick natively — same model as the OpenRouter
+    # slug but one network hop fewer and Groq-LPU TTFT, so prefer this preset
+    # when Maverick is the target.
+    "groq-llama-4-maverick": {
+        "label": "Groq · Llama 4 Maverick",
+        "provider": "groq",
+        "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
     },
     "or-claude-haiku-4.5": {
         "label": "OpenRouter · Claude Haiku 4.5 (fast)",
@@ -181,7 +192,24 @@ def build_llm_service(settings, model: str):
     if entry["provider"] == "openrouter":
         api_key = settings.openrouter_api_key
         if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY must be set to use OpenRouter models.")
+            # The active model is persisted server-side, so raising here would
+            # kill every call (browser and Twilio) until the pointer is
+            # cleared. Degrade to the Groq fallback preset instead.
+            if not settings.groq_api_key:
+                raise RuntimeError(
+                    "OPENROUTER_API_KEY must be set to use OpenRouter models "
+                    "(and no GROQ_API_KEY is configured to fall back to)."
+                )
+            fallback = MODELS[FALLBACK_MODEL_KEY]
+            logger.warning(
+                "OPENROUTER_API_KEY is not set; falling back from %s to %s",
+                entry["model"],
+                fallback["model"],
+            )
+            llm_settings.model = fallback["model"]
+            return OpenAILLMService(
+                api_key=settings.groq_api_key, base_url=GROQ_BASE_URL, settings=llm_settings
+            )
         return OpenAILLMService(
             api_key=api_key, base_url=OPENROUTER_BASE_URL, settings=llm_settings
         )

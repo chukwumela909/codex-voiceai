@@ -10,6 +10,16 @@ dependencies = [
     "pydantic-settings>=2.4.0",
     "websockets>=13.0",
     "pipecat-ai[deepgram,groq,elevenlabs,silero]>=1.2,<2",
+    # LocalSmartTurnAnalyzerV3 (app/pipeline.py) — pipecat 1.2 has no extra that
+    # covers the v3 ONNX analyzer, so its deps must be listed explicitly or the
+    # Docker image ImportErrors on every Pipecat session.
+    "onnxruntime>=1.20",
+    "soxr>=0.5",
+    "transformers>=4.48,<6",
+    # MarkdownTextFilter (LLM -> TTS text sanitation).
+    "markdown>=3.6",
+    # SoundfileMixer (server-side room tone on Pipecat/Twilio output).
+    "soundfile>=0.12",
 ]
 
 [project.optional-dependencies]

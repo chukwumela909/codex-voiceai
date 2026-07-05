@@ -83,8 +83,16 @@ def test_build_llm_service_openrouter_constructs():
     assert type(svc).__name__ == "OpenAILLMService"
 
 
-def test_build_llm_service_openrouter_requires_key():
+def test_build_llm_service_openrouter_missing_key_falls_back_to_groq():
+    # The active model is persisted server-side, so a hard error here would
+    # take down every call (browser + Twilio) until the pointer is cleared.
     settings = _settings(openrouter_api_key=None)
+    svc = build_llm_service(settings, "or-gpt-4o-mini")
+    assert type(svc).__name__ == "OpenAILLMService"
+
+
+def test_build_llm_service_raises_when_no_provider_key_at_all():
+    settings = _settings(openrouter_api_key=None, groq_api_key=None)
     with pytest.raises(RuntimeError):
         build_llm_service(settings, "or-gpt-4o-mini")
 
@@ -129,9 +137,9 @@ def test_build_llm_service_raw_slug_uses_openrouter():
     assert type(svc).__name__ == "OpenAILLMService"
 
 
-def test_build_llm_service_raw_slug_requires_key():
-    with pytest.raises(RuntimeError):
-        build_llm_service(_settings(openrouter_api_key=None), "anthropic/claude-sonnet-4.5")
+def test_build_llm_service_raw_slug_missing_key_falls_back_to_groq():
+    svc = build_llm_service(_settings(openrouter_api_key=None), "anthropic/claude-sonnet-4.5")
+    assert type(svc).__name__ == "OpenAILLMService"
 
 
 def test_default_model_can_be_a_raw_slug(tmp_path):

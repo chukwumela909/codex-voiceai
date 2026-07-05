@@ -27,6 +27,10 @@ class Character(BaseModel):
     identity_response_style: str = ""
     speaking_style_rules: list[str] = Field(default_factory=list)
     example_exchanges: list[dict[str, str]] | None = None
+    # Fixed line spoken the instant a call connects (no LLM round trip). Real
+    # people answer with a flat "Hello?", not a composed greeting — and the
+    # caller hears it immediately instead of waiting out LLM+TTS warmup.
+    greeting: str = ""
 
     # --- Life canon: the substance the persona draws on so it stays consistent
     # instead of improvising a fresh (and contradictory) life every turn. ---
