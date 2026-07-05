@@ -1,0 +1,46 @@
+# Build context hygiene. The image only needs pyproject.toml, app/, frontend/.
+# Keeping everything else out shrinks the context (a local .venv is ~900MB) and
+# guarantees runtime state / secrets are never baked into a layer.
+
+# VCS
+.git
+.gitignore
+.dockerignore
+Dockerfile
+
+# Virtualenvs and Python caches
+.venv
+venv
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime state — must come from the mounted /app/data volume, never the image
+data/
+
+# Logs and build artifacts
+*.log
+build/
+dist/
+
+# Dev-only trees not needed to run the service
+tests/
+docs/
+plans/
+PRD/
+.agents/
+.claude/
+skills-lock.json
+
+# Local env / secrets (never bake secrets into an image; keep the example)
+.env
+.env.*
+!.env.example
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store

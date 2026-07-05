@@ -117,8 +117,14 @@ class Settings(BaseSettings):
     )
     memory_enabled: str = Field(default="auto", alias="VOICE_AGENT_MEMORY_ENABLED")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    # "local" = on-device model2vec embeddings (no key, works in live); "openai"
+    # = OpenAI embeddings API (needs OPENAI_API_KEY, live only). Anything else
+    # falls back to the deterministic mock embedder.
     memory_embedding_provider: str = Field(default="openai", alias="VOICE_AGENT_MEMORY_EMBEDDING_PROVIDER")
     memory_embedding_model: str = Field(default="text-embedding-3-small", alias="VOICE_AGENT_MEMORY_EMBEDDING_MODEL")
+    memory_embedding_local_model: str = Field(
+        default="minishlab/potion-base-8M", alias="VOICE_AGENT_MEMORY_LOCAL_MODEL"
+    )
     memory_top_k: int = Field(default=5, ge=1, le=50, alias="VOICE_AGENT_MEMORY_TOP_K")
     memory_dedupe_threshold: float = Field(default=0.92, ge=0.0, le=1.0, alias="VOICE_AGENT_MEMORY_DEDUPE_THRESHOLD")
     memory_dir: str = Field(default="data/memory", alias="VOICE_AGENT_MEMORY_DIR")
@@ -262,6 +268,13 @@ class Settings(BaseSettings):
         # format to validate here. Kept for the health-report contract.
         return []
 
+    def _embedder_ready(self) -> bool:
+        # One source of truth for "is a real (non-mock) embedder usable" —
+        # local model2vec (no key, any mode) or OpenAI (live + key).
+        from app.memory.embedder import embedder_ready
+
+        return embedder_ready(self)
+
     def _llm_status(self) -> dict:
         from app.llm_models import MODELS, resolve_model
 
@@ -307,11 +320,7 @@ class Settings(BaseSettings):
                 "configured": self.normalized_memory_enabled,
                 "enabled": self.memory_effective_enabled,
                 "embedding_provider": self.memory_embedding_provider,
-                "embedder_ready": (
-                    self.normalized_mode == "live"
-                    and self.memory_embedding_provider.strip().lower() == "openai"
-                    and bool(self.openai_api_key)
-                ),
+                "embedder_ready": self._embedder_ready(),
                 "top_k": self.memory_top_k,
                 "session_summary_enabled": self.memory_session_summary_enabled,
             },

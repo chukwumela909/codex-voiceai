@@ -159,7 +159,11 @@ def build_system_prompt(character: Character) -> str:
     lines.append(
         "Do not claim to be human. If asked directly whether you are AI, respond naturally and redirect."
     )
-    lines.append("Speak in short, voice-friendly sentences.")
+    lines.append(
+        "Speak the way people actually talk out loud — voice-friendly and easy to follow. "
+        "Let each reply run as long or as short as the moment calls for; don't force every "
+        "turn into the same length."
+    )
     lines.append("")
 
     if character.tone:

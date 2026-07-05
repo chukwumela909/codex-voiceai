@@ -11,7 +11,13 @@ os.environ.setdefault("VOICE_AGENT_MODE", "mock")
 from app.conversation_context import agent_transcript_with_context
 from app.config import Settings
 from app.memory import build_manager, get_store, reset_store_cache
-from app.memory.embedder import MockEmbedder, build_embedder, embedder_ready
+from app.memory.embedder import (
+    DEFAULT_LOCAL_MODEL,
+    LocalEmbedder,
+    MockEmbedder,
+    build_embedder,
+    embedder_ready,
+)
 from app.memory.manager import MemoryManager
 from app.memory.store import MemoryRecord, VectorMemoryStore, cosine
 from app.main import app
@@ -53,6 +59,76 @@ def test_build_embedder_picks_mock_without_live_key():
     s = Settings(_env_file=None)  # mock mode, no keys
     assert build_embedder(s).name == "mock"
     assert embedder_ready(s) is False
+
+
+# ---- local embedder (model2vec) --------------------------------------------
+
+
+class _FakeStaticModel:
+    """Stand-in for model2vec.StaticModel — no download, numpy output."""
+
+    def __init__(self, dim: int = 4):
+        self.dim = dim
+        self.calls: list[list[str]] = []
+
+    def encode(self, texts):
+        import numpy as np
+
+        self.calls.append(list(texts))
+        return np.array([[float(len(t))] * self.dim for t in texts], dtype="float32")
+
+
+def test_local_embedder_returns_plain_float_lists():
+    fake = _FakeStaticModel(dim=4)
+    emb = LocalEmbedder(model=fake)
+    out = run(emb.embed(["ab", "cde"]))
+    assert out == [[2.0, 2.0, 2.0, 2.0], [3.0, 3.0, 3.0, 3.0]]
+    # Must be JSON-serializable Python floats (numpy floats break the store).
+    assert all(isinstance(x, float) for row in out for x in row)
+    assert fake.calls == [["ab", "cde"]]
+
+
+def test_local_embedder_falls_back_to_mock_on_load_failure(monkeypatch):
+    emb = LocalEmbedder(model_id="does/not-exist")
+
+    def _boom():
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(emb, "_load", _boom)
+    out = run(emb.embed(["hello world"]))
+    assert len(out[0]) == 256  # mock embedder dimensionality
+    # Second call keeps using the fallback without retrying the load.
+    assert len(run(emb.embed(["again"]))[0]) == 256
+
+
+def test_build_embedder_selects_local_in_any_mode(monkeypatch):
+    # provider=local needs no key and is honored even in mock mode (unlike openai).
+    monkeypatch.setenv("VOICE_AGENT_MODE", "mock")
+    monkeypatch.setenv("VOICE_AGENT_MEMORY_EMBEDDING_PROVIDER", "local")
+    s = Settings(_env_file=None)
+    emb = build_embedder(s)
+    assert emb.name == "local"
+    assert emb.model_id == DEFAULT_LOCAL_MODEL
+    assert embedder_ready(s) is True
+
+
+def test_local_embedder_model_id_is_configurable(monkeypatch):
+    monkeypatch.setenv("VOICE_AGENT_MEMORY_EMBEDDING_PROVIDER", "local")
+    monkeypatch.setenv("VOICE_AGENT_MEMORY_LOCAL_MODEL", "minishlab/potion-retrieval-32M")
+    s = Settings(_env_file=None)
+    assert build_embedder(s).model_id == "minishlab/potion-retrieval-32M"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("RUN_LOCAL_EMBEDDER_INTEGRATION"),
+    reason="downloads the model2vec model; set RUN_LOCAL_EMBEDDER_INTEGRATION=1 to run",
+)
+def test_local_embedder_real_model_is_semantic():
+    emb = LocalEmbedder()
+    facts = run(emb.embed(["I play drums in a band", "the weather is nice today"]))
+    [query] = run(emb.embed(["do you make music?"]))
+    # The music query must be closer to the drums fact than the weather fact.
+    assert cosine(query, facts[0]) > cosine(query, facts[1])
 
 
 # ---- store ------------------------------------------------------------------

@@ -85,6 +85,16 @@ async def warm_pipecat_pipeline() -> None:
     except Exception as exc:  # noqa: BLE001 — warmup must never block startup
         logger.warning("pipecat warmup skipped: %s", exc)
 
+    # Pre-load the local embedding model in the background (best-effort) so the
+    # first caller doesn't pay the model download/load on the memory path. Runs
+    # detached: it must not delay the server accepting connections.
+    async def _warm_embedder() -> None:
+        from app.memory.embedder import warm_embedder
+
+        await warm_embedder(settings)
+
+    asyncio.create_task(_warm_embedder())
+
 
 def log_info(message: str, session_id: str = "-", **extra: object) -> None:
     logger.info(message, extra={"session_id": session_id, **extra})
