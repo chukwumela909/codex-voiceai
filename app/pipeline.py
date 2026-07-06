@@ -236,11 +236,17 @@ def build_user_turn_strategies(
 ) -> UserTurnStrategies:
     """Map turn-taking settings onto pipecat user turn strategies.
 
-    Start: with ``interruption_min_words > 0``, a turn (and therefore an
-    interruption while the bot speaks) only starts after that many transcribed
-    words, so noise can't barge in. MinWords must be the sole start strategy —
-    a VAD start strategy would open the turn first and the controller ignores
-    later start triggers, so MinWords would never gate interruptions.
+    Start (controls barge-in responsiveness):
+      - ``interruption_min_words == 0`` → pipecat's default VAD start strategy:
+        the bot is interrupted the instant speech is detected (~200ms). Snappiest,
+        but ambient noise/echo can trigger it.
+      - ``interruption_min_words > 0`` → a turn (and therefore an interruption
+        while the bot speaks) only starts after that many transcribed words, so
+        non-speech noise can't barge in. The cost is latency (the words must be
+        spoken *and* transcribed first) and that interjections shorter than the
+        threshold never interrupt at all. MinWords must be the sole start strategy —
+        a VAD start strategy would open the turn first and the controller ignores
+        later start triggers, so MinWords would never gate interruptions.
 
     Stop: smart turn hands VAD pauses to a local end-of-turn model (holds
     through mid-thought pauses up to ``smart_turn_stop_secs``); with it

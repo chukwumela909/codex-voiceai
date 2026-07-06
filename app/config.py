@@ -59,9 +59,14 @@ class Settings(BaseSettings):
     speech_timeout_stop_secs: float = Field(
         default=0.8, gt=0, alias="VOICE_AGENT_SPEECH_TIMEOUT_STOP_SECS"
     )
-    # Words required in a transcript before barge-in interrupts the bot, so a
-    # cough or background noise can't cut it off. 0 = interrupt on any speech.
-    interruption_min_words: int = Field(default=2, ge=0, alias="VOICE_AGENT_INTERRUPT_MIN_WORDS")
+    # How barge-in (interrupting the bot mid-sentence) is gated:
+    #   0 = VAD-based — interrupt the instant speech is detected (~200ms). Snappiest,
+    #       but ambient noise or echo can cut the bot off.
+    #   1 = one transcribed word interrupts. Catches short interjections ("stop",
+    #       "wait") and stays robust to non-speech noise. Good default for phone calls.
+    #   2+ = require that many words. Most robust, but laggy and misses one-word
+    #       interjections entirely (they never reach the threshold, so the bot talks over).
+    interruption_min_words: int = Field(default=1, ge=0, alias="VOICE_AGENT_INTERRUPT_MIN_WORDS")
     groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
     groq_temperature: float = Field(default=0.7, alias="GROQ_TEMPERATURE")
     # Caps reply length to voice-appropriate size. 0 = no cap.

@@ -100,6 +100,17 @@ def test_zero_min_words_restores_default_start_strategies(monkeypatch: pytest.Mo
     assert TranscriptionUserTurnStartStrategy in types
 
 
+def test_default_interruption_is_one_word(monkeypatch: pytest.MonkeyPatch):
+    # Default gates barge-in on a single word: catches one-word interjections
+    # ("stop", "wait") that a 2-word threshold would let the bot talk over, while
+    # staying robust to non-speech noise.
+    settings = make_settings(monkeypatch)
+    strategies = build_user_turn_strategies(settings)
+    assert len(strategies.start) == 1
+    assert isinstance(strategies.start[0], MinWordsUserTurnStartStrategy)
+    assert strategies.start[0]._min_words == 1
+
+
 def _seed_characters(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(characters_mod, "CHARACTERS_DIR", tmp_path)
     save_character(Character(id="alpha", name="Alpha", role="tester"))

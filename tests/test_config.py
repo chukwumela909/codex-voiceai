@@ -136,7 +136,7 @@ def test_balanced_fast_voice_timing_defaults(monkeypatch):
             "stop_secs": 2.0,
         },
         "speech_timeout_stop_secs": 0.8,
-        "interruption_min_words": 2,
+        "interruption_min_words": 1,
     }
     assert status["audio"] == {
         "input_gain": 2.0,
