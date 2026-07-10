@@ -15,6 +15,8 @@ import asyncio
 import logging
 from typing import Callable
 
+import httpx
+
 from pipecat.frames.frames import Frame, LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor

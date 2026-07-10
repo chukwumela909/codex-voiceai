@@ -28,13 +28,23 @@ MODEL_STATE_DIR = Path("data")
 ACTIVE_MODEL_FILE = "active_model"
 
 MODELS: dict[str, dict] = {
+    "groq-gpt-oss-120b": {
+        "label": "Groq · GPT-OSS 120B (quality)",
+        "provider": "groq",
+        "model": "openai/gpt-oss-120b",
+    },
+    "groq-gpt-oss-20b": {
+        "label": "Groq · GPT-OSS 20B (fast)",
+        "provider": "groq",
+        "model": "openai/gpt-oss-20b",
+    },
     "groq-llama-3.1-8b": {
-        "label": "Groq · Llama 3.1 8B (fast)",
+        "label": "Groq · Llama 3.1 8B (retires Aug 16)",
         "provider": "groq",
         "model": "llama-3.1-8b-instant",
     },
     "groq-llama-3.3-70b": {
-        "label": "Groq · Llama 3.3 70B",
+        "label": "Groq · Llama 3.3 70B (retires Aug 16)",
         "provider": "groq",
         "model": "llama-3.3-70b-versatile",
     },
@@ -42,7 +52,7 @@ MODELS: dict[str, dict] = {
     # slug but one network hop fewer and Groq-LPU TTFT, so prefer this preset
     # when Maverick is the target.
     "groq-llama-4-maverick": {
-        "label": "Groq · Llama 4 Maverick",
+        "label": "Groq · Llama 4 Maverick (retired)",
         "provider": "groq",
         "model": "meta-llama/llama-4-maverick-17b-128e-instruct",
     },
@@ -73,7 +83,7 @@ MODELS: dict[str, dict] = {
     },
 }
 
-FALLBACK_MODEL_KEY = "groq-llama-3.1-8b"
+FALLBACK_MODEL_KEY = "groq-gpt-oss-20b"
 
 
 def default_model_key(settings) -> str:
@@ -167,6 +177,37 @@ def resolve_active_model_key(
     return resolve_model(settings, override=override, directory=directory)["key"]
 
 
+def resolve_chat_target(
+    settings, *, override: str | None = None, directory: Path | None = None
+) -> dict:
+    """Resolve the actual chat endpoint used by every conversation surface.
+
+    This includes the shared missing-OpenRouter-key fallback, preventing Studio,
+    classic, and live calls from presenting one model while using another.
+    """
+    entry = resolve_model(settings, override=override, directory=directory)
+    fallback_from: str | None = None
+    if entry["provider"] == "openrouter":
+        api_key = getattr(settings, "openrouter_api_key", None)
+        base_url = OPENROUTER_BASE_URL
+        if not api_key and getattr(settings, "groq_api_key", None):
+            fallback_from = entry["key"]
+            entry = {"key": FALLBACK_MODEL_KEY, **MODELS[FALLBACK_MODEL_KEY]}
+            api_key = settings.groq_api_key
+            base_url = GROQ_BASE_URL
+    else:
+        api_key = getattr(settings, "groq_api_key", None)
+        base_url = GROQ_BASE_URL
+
+    return {
+        **entry,
+        "api_key": api_key,
+        "base_url": base_url,
+        "endpoint_url": base_url + "/chat/completions",
+        "fallback_from": fallback_from,
+    }
+
+
 def build_llm_service(settings, model: str):
     """Construct the Pipecat LLM service for a model (preset key or OpenRouter slug).
 
@@ -177,46 +218,31 @@ def build_llm_service(settings, model: str):
     """
     from pipecat.services.openai.llm import OpenAILLMService
 
-    entry = model_entry_for(model, settings)
-    if entry is None:
-        key = default_model_key(settings)
-        entry = {"key": key, **MODELS[key]}
+    target = resolve_chat_target(settings, override=model)
+    if not target["api_key"]:
+        key_name = "OPENROUTER_API_KEY" if target["provider"] == "openrouter" else "GROQ_API_KEY"
+        raise RuntimeError(f"{key_name} must be set to use {target['model']}.")
+    if target["fallback_from"]:
+        logger.warning(
+            "OPENROUTER_API_KEY is not set; falling back from %s to %s",
+            target["fallback_from"],
+            target["model"],
+        )
+
+    extra: dict = {}
+    if target["provider"] == "groq" and target["model"].startswith("openai/gpt-oss-"):
+        extra["reasoning_effort"] = getattr(settings, "groq_reasoning_effort", "low")
 
     llm_settings = OpenAILLMService.Settings(
-        model=entry["model"],
+        model=target["model"],
         temperature=settings.groq_temperature,
+        extra=extra,
     )
     if settings.groq_max_tokens > 0:
         llm_settings.max_completion_tokens = settings.groq_max_tokens
 
-    if entry["provider"] == "openrouter":
-        api_key = settings.openrouter_api_key
-        if not api_key:
-            # The active model is persisted server-side, so raising here would
-            # kill every call (browser and Twilio) until the pointer is
-            # cleared. Degrade to the Groq fallback preset instead.
-            if not settings.groq_api_key:
-                raise RuntimeError(
-                    "OPENROUTER_API_KEY must be set to use OpenRouter models "
-                    "(and no GROQ_API_KEY is configured to fall back to)."
-                )
-            fallback = MODELS[FALLBACK_MODEL_KEY]
-            logger.warning(
-                "OPENROUTER_API_KEY is not set; falling back from %s to %s",
-                entry["model"],
-                fallback["model"],
-            )
-            llm_settings.model = fallback["model"]
-            return OpenAILLMService(
-                api_key=settings.groq_api_key, base_url=GROQ_BASE_URL, settings=llm_settings
-            )
-        return OpenAILLMService(
-            api_key=api_key, base_url=OPENROUTER_BASE_URL, settings=llm_settings
-        )
-
-    # Default provider: Groq direct (lowest latency).
     return OpenAILLMService(
-        api_key=settings.groq_api_key, base_url=GROQ_BASE_URL, settings=llm_settings
+        api_key=target["api_key"], base_url=target["base_url"], settings=llm_settings
     )
 
 

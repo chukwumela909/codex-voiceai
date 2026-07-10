@@ -9,6 +9,12 @@ def test_parse_groq_stream_line_returns_delta_content():
     assert parse_groq_stream_line(line) == "Hello"
 
 
+def test_parse_groq_stream_line_removes_unspeakable_control_bytes():
+    line = 'data: {"choices":[{"delta":{"content":"Well\\u0000, yeah."}}]}'
+
+    assert parse_groq_stream_line(line) == "Well, yeah."
+
+
 def test_parse_groq_stream_line_ignores_done_and_empty_lines():
     assert parse_groq_stream_line("") is None
     assert parse_groq_stream_line("data: [DONE]") is None

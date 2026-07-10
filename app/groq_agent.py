@@ -1,9 +1,13 @@
 import json
+import re
 from collections.abc import AsyncIterator
 
 import httpx
 
 from app.speech_tags import ALLOWED_TAGS, _TAG_PATTERN
+
+
+_UNSPEAKABLE_CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 class GroqStreamingAgent:
@@ -14,11 +18,17 @@ class GroqStreamingAgent:
         model: str,
         persona: str,
         temperature: float = 0.7,
+        max_tokens: int = 320,
+        reasoning_effort: str = "low",
+        endpoint_url: str = "https://api.groq.com/openai/v1/chat/completions",
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.persona = persona
         self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
+        self.endpoint_url = endpoint_url
 
     async def stream_response(self, transcript: list[dict[str, str]]) -> AsyncIterator[str]:
         messages = [{"role": "system", "content": self.persona}, *transcript]
@@ -26,9 +36,12 @@ class GroqStreamingAgent:
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
-            "max_tokens": 120,
             "stream": True,
         }
+        if self.max_tokens > 0:
+            payload["max_tokens"] = self.max_tokens
+        if self.model.startswith("openai/gpt-oss-"):
+            payload["reasoning_effort"] = self.reasoning_effort
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -37,7 +50,7 @@ class GroqStreamingAgent:
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream(
                 "POST",
-                "https://api.groq.com/openai/v1/chat/completions",
+                self.endpoint_url,
                 headers=headers,
                 json=payload,
             ) as response:
@@ -62,7 +75,9 @@ def parse_groq_stream_line(line: str) -> str | None:
     if not choices:
         return None
 
-    return choices[0].get("delta", {}).get("content") or None
+    content = choices[0].get("delta", {}).get("content") or ""
+    content = _UNSPEAKABLE_CONTROL_RE.sub("", content)
+    return content or None
 
 
 def pop_speakable_chunks(buffer: str, *, force: bool = False) -> tuple[list[str], str]:

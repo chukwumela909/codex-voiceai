@@ -54,16 +54,20 @@ Server:
 Provider tuning:
 
 - `DEEPGRAM_MODEL`, default `nova-3`
-- `DEEPGRAM_ENDPOINTING_MS`, default `220`
+- `DEEPGRAM_ENDPOINTING_MS`, default `200`
 - `DEEPGRAM_UTTERANCE_END_MS`, default `1000`
-- `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS`, default `1000`; fallback debounce for useful partial transcripts when Deepgram has not emitted `speech_final`
+- `VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS`, default `500`; legacy-path fallback debounce for useful partial transcripts when Deepgram has not emitted `speech_final`
 - `VOICE_AGENT_INPUT_GAIN`, default `2.0`; server-side PCM gain applied before STT for quiet microphones
 - `VOICE_AGENT_INTENT_INFERENCE_ENABLED`, default `true`; keeps raw transcripts visible while adding hidden Groq guidance to infer likely intent from recent context
-- `GROQ_MODEL`, default `llama-3.1-8b-instant`
-- `GROQ_TEMPERATURE`, default `0.7`
+- `VOICE_AGENT_CONVERSATION_FLOW_ENABLED`, default `true`; adds a local per-turn social brief for characters whose `conversation_mode` is `social` (reply length, question streaks, opener/filler variety, and non-assistant stance)
+- `GROQ_MODEL`, default `openai/gpt-oss-120b` for the classic/preview path
+- `DEFAULT_MODEL`, default `groq-gpt-oss-120b` for the Pipecat path
+- `GROQ_TEMPERATURE`, default `0.8`
+- `GROQ_REASONING_EFFORT`, default `low`; GPT-OSS only
+- `GROQ_MAX_TOKENS`, default `320`; includes the reasoning budget, while the conversation director keeps spoken replies compact
 - `ELEVENLABS_MODEL`, default `eleven_flash_v2_5`. Note: `eleven_v3` is **not** supported on the realtime WebSocket the pipeline uses — keep a streaming model (`eleven_flash_v2_5` or `eleven_turbo_v2_5`)
 - `ELEVENLABS_VOICE_ID`; an ElevenLabs voice id (opaque string, e.g. `21m00Tcm4TlvDq8ikWAM`). This is only the fallback default — the active voice can be picked from the UI (see below), which overrides it for all calls
-- `ELEVENLABS_SAMPLE_RATE`, default `16000`
+- `ELEVENLABS_SAMPLE_RATE`, default `24000`; the Pipecat browser reads this value from `/health` and constructs playback at the same rate to avoid pitch/speed distortion
 - `ELEVENLABS_SPEED`, default `1.0` (`0.7` to `1.2`; higher is faster)
 - `ELEVENLABS_STABILITY`, default `0.5` (`0.0` to `1.0`)
 - `ELEVENLABS_SIMILARITY_BOOST`, default `0.8` (`0.0` to `1.0`)
@@ -83,9 +87,9 @@ The ambience bed is generated in the browser with Web Audio after microphone per
 
 ## Contextual Speech
 
-Live mode preserves raw Deepgram transcripts in `transcript.partial`, `transcript.final`, logs, and stored conversation turns. When `VOICE_AGENT_INTENT_INFERENCE_ENABLED=true`, the Groq request also receives hidden guidance that the latest user turn may include speech-to-text errors, so it should infer likely intent from recent context and ask a short clarifying question only when ambiguity blocks a useful answer.
+Live mode preserves raw Deepgram transcripts in `transcript.partial`, `transcript.final`, logs, and stored conversation turns. When `VOICE_AGENT_INTENT_INFERENCE_ENABLED=true`, the model request also receives hidden guidance that the latest user turn may include speech-to-text errors. For a character with `conversation_mode: "social"`, `VOICE_AGENT_CONVERSATION_FLOW_ENABLED=true` also adds a fresh deterministic turn brief immediately before the LLM: match the caller's turn size, avoid consecutive question endings, vary recent openings/fillers, contribute a point of view, and avoid help-desk reflexes. The raw transcript and stored character are unchanged.
 
-`VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS` controls the app fallback used when Deepgram has not emitted `speech_final`. The default is `1000ms` to leave more room for natural thinking pauses. Lower it for snappier demos; raise it when the assistant interrupts too early.
+`VOICE_AGENT_PARTIAL_IDLE_FINALIZE_MS` controls the classic app fallback used when Deepgram has not emitted `speech_final`. The default is `500ms`; the default Pipecat page instead uses Silero VAD plus the local Smart Turn analyzer to distinguish an end-of-thought from a thinking pause.
 
 ElevenLabs `eleven_flash_v2_5` has no SSML/emotion-tag support, so prosody is controlled entirely through the voice settings (`ELEVENLABS_STABILITY`, `ELEVENLABS_SIMILARITY_BOOST`, `ELEVENLABS_STYLE`, `ELEVENLABS_USE_SPEAKER_BOOST`, `ELEVENLABS_SPEED`). Any stray inline markup the model emits (e.g. `<emotion>`, `<break>`) is stripped before TTS so it is never read aloud.
 
@@ -106,6 +110,8 @@ The Pipecat page has a **Model** picker so you can switch the LLM on a live call
 
 - **Groq** — direct, lowest latency (free tier). Needs `GROQ_API_KEY`.
 - **OpenRouter** — one key, many models (Claude, GPT-4o-mini, Gemini, Llama…). Needs `OPENROUTER_API_KEY`; without it the OpenRouter entries won't work and the picker says so.
+
+The Groq defaults are now **GPT-OSS 120B** (quality) and **GPT-OSS 20B** (latency), both with low reasoning effort for casual speech. The older Groq Llama presets remain visible only for comparison and are labeled with their retirement status.
 
 Beyond the curated presets, you can pick or paste **any OpenRouter model id** (e.g. `anthropic/claude-sonnet-4.5`) in the model bar's text field — it autocompletes from OpenRouter's live catalog (`GET /openrouter/models`). A value with a `/` is treated as a raw OpenRouter slug; a value without one must be a preset key.
 

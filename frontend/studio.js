@@ -190,6 +190,8 @@
   function writeForm(char) {
     $("fName").value = char.name || "";
     $("fRole").value = char.role || "";
+    $("fConversationMode").value = char.conversation_mode || "assistant";
+    $("fGreeting").value = char.greeting || "";
     $("fGrammar").value = char.grammar || "";
     $("fIdentity").value = char.identity_response_style || "";
     $("fBackstory").value = char.backstory || "";
@@ -206,6 +208,8 @@
     const char = {
       name: $("fName").value.trim(),
       role: $("fRole").value.trim(),
+      conversation_mode: $("fConversationMode").value,
+      greeting: $("fGreeting").value.trim(),
       grammar: $("fGrammar").value.trim(),
       identity_response_style: $("fIdentity").value.trim(),
       backstory: $("fBackstory").value.trim(),

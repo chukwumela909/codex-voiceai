@@ -67,17 +67,20 @@ class Settings(BaseSettings):
     #   2+ = require that many words. Most robust, but laggy and misses one-word
     #       interjections entirely (they never reach the threshold, so the bot talks over).
     interruption_min_words: int = Field(default=1, ge=0, alias="VOICE_AGENT_INTERRUPT_MIN_WORDS")
-    groq_model: str = Field(default="llama-3.1-8b-instant", alias="GROQ_MODEL")
-    groq_temperature: float = Field(default=0.7, alias="GROQ_TEMPERATURE")
+    # GPT-OSS replaces the Groq-hosted Llama defaults that retire in Aug 2026.
+    # Low reasoning keeps casual speech responsive instead of over-composed.
+    groq_model: str = Field(default="openai/gpt-oss-120b", alias="GROQ_MODEL")
+    groq_temperature: float = Field(default=0.8, ge=0.0, le=2.0, alias="GROQ_TEMPERATURE")
+    groq_reasoning_effort: str = Field(default="low", alias="GROQ_REASONING_EFFORT")
     # Caps reply length to voice-appropriate size. 0 = no cap.
-    groq_max_tokens: int = Field(default=200, ge=0, alias="GROQ_MAX_TOKENS")
+    groq_max_tokens: int = Field(default=320, ge=0, alias="GROQ_MAX_TOKENS")
     # Sliding-window cap on conversation turns sent to the LLM each turn. Bounds
     # per-turn token cost so a long call doesn't keep re-sending the full
     # transcript (which exhausts Groq's TPM budget and stalls replies). 0 = unbounded.
     llm_context_max_turns: int = Field(default=12, ge=0, alias="VOICE_AGENT_LLM_CONTEXT_MAX_TURNS")
     # Which LLM answers by default (a key in app/llm_models.py MODELS). The UI model
     # picker overrides this per session via ?model=. Groq or an OpenRouter model.
-    default_model: str = Field(default="groq-llama-3.1-8b", alias="DEFAULT_MODEL")
+    default_model: str = Field(default="groq-gpt-oss-120b", alias="DEFAULT_MODEL")
     elevenlabs_model: str = Field(default="eleven_flash_v2_5", alias="ELEVENLABS_MODEL")
     elevenlabs_speed: float = Field(default=1.0, alias="ELEVENLABS_SPEED")
     elevenlabs_voice_id: str | None = Field(default=None, alias="ELEVENLABS_VOICE_ID")
@@ -103,6 +106,10 @@ class Settings(BaseSettings):
     )
     default_character_id: str = Field(default="jimmy", alias="VOICE_AGENT_DEFAULT_CHARACTER")
     intent_inference_enabled: bool = Field(default=True, alias="VOICE_AGENT_INTENT_INFERENCE_ENABLED")
+    conversation_flow_enabled: bool = Field(
+        default=True,
+        alias="VOICE_AGENT_CONVERSATION_FLOW_ENABLED",
+    )
     ambience_enabled: bool = Field(default=True, alias="VOICE_AGENT_AMBIENCE_ENABLED")
     ambience_scene: str = Field(default="room_line", alias="VOICE_AGENT_AMBIENCE_SCENE")
     ambience_volume: float = Field(default=DEFAULT_AMBIENCE_VOLUME, alias="VOICE_AGENT_AMBIENCE_VOLUME")
@@ -152,6 +159,14 @@ class Settings(BaseSettings):
         if not 0.7 <= value <= 1.2:
             raise ValueError("ELEVENLABS_SPEED must be between 0.7 and 1.2")
         return value
+
+    @field_validator("groq_reasoning_effort")
+    @classmethod
+    def validate_groq_reasoning_effort(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in {"low", "medium", "high"}:
+            raise ValueError("GROQ_REASONING_EFFORT must be low, medium, or high")
+        return normalized
 
     @field_validator("partial_idle_finalize_ms")
     @classmethod
@@ -257,10 +272,18 @@ class Settings(BaseSettings):
         return False
 
     def missing_live_keys(self) -> list[str]:
+        from app.llm_models import resolve_model
+
         missing: list[str] = []
         if not self.deepgram_api_key:
             missing.append("DEEPGRAM_API_KEY")
-        if not self.groq_api_key:
+        model = resolve_model(self)
+        if model["provider"] == "openrouter":
+            # Groq is a valid automatic fallback when the selected OpenRouter
+            # key is absent; only report a blocker when neither route exists.
+            if not self.openrouter_api_key and not self.groq_api_key:
+                missing.append("OPENROUTER_API_KEY")
+        elif not self.groq_api_key:
             missing.append("GROQ_API_KEY")
         if not self.elevenlabs_api_key:
             missing.append("ELEVENLABS_API_KEY")
@@ -288,6 +311,9 @@ class Settings(BaseSettings):
             "active_model": entry["key"],
             "provider": entry["provider"],
             "model": entry["model"],
+            "temperature": self.groq_temperature,
+            "max_completion_tokens": self.groq_max_tokens,
+            "reasoning_effort": self.groq_reasoning_effort,
             "openrouter_configured": bool(self.openrouter_api_key),
             "available": list(MODELS.keys()),
         }
@@ -319,6 +345,7 @@ class Settings(BaseSettings):
             },
             "conversation": {
                 "intent_inference_enabled": self.intent_inference_enabled,
+                "flow_direction_enabled": self.conversation_flow_enabled,
             },
             "llm": self._llm_status(),
             "memory": {

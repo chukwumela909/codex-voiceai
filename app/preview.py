@@ -8,10 +8,12 @@ from __future__ import annotations
 import base64
 import time
 
-from app.characters import Character, build_system_prompt
+from app.characters import Character, build_relevant_canon, build_system_prompt
 from app.config import Settings
+from app.conversation_context import agent_transcript_with_context
 from app.elevenlabs_tts import ElevenLabsStreamingTTS
 from app.groq_agent import GroqStreamingAgent
+from app.llm_models import resolve_chat_target
 from app.mock_conversation import generate_mock_pcm
 from app.voice_settings import resolve_active_voice_id
 
@@ -57,23 +59,46 @@ async def preview_character(character: Character, message: str, settings: Settin
 
     # --- LLM: reuse the same agent + system-prompt builder as a live turn ---
     persona = build_system_prompt(character)
-    transcript = [{"role": "user", "content": message}]
+    transcript = agent_transcript_with_context(
+        [{"role": "user", "content": message}],
+        intent_enabled=settings.intent_inference_enabled,
+        conversation_flow_enabled=(
+            settings.conversation_flow_enabled and character.conversation_mode == "social"
+        ),
+        character_name=character.name,
+        private_context=build_relevant_canon(
+            character,
+            [{"role": "user", "content": message}],
+        ),
+    )
     llm_provider = "mock"
     text = ""
     llm_start = time.perf_counter()
-    if mode == "live" and settings.groq_api_key:
+    model_entry = resolve_chat_target(settings)
+    if model_entry["fallback_from"]:
+        warnings.append(
+            {
+                "provider": "openrouter",
+                "message": "OPENROUTER_API_KEY is not configured; preview used the Groq fallback.",
+            }
+        )
+    llm_key = model_entry["api_key"]
+    if mode == "live" and llm_key:
         agent = GroqStreamingAgent(
-            api_key=settings.groq_api_key,
-            model=settings.groq_model,
+            api_key=llm_key,
+            model=model_entry["model"],
             persona=persona,
             temperature=settings.groq_temperature,
+            max_tokens=settings.groq_max_tokens,
+            reasoning_effort=settings.groq_reasoning_effort,
+            endpoint_url=model_entry["endpoint_url"],
         )
         try:
             async for delta in agent.stream_response(transcript):
                 text += delta
-            llm_provider = "groq"
+            llm_provider = model_entry["provider"]
         except Exception as exc:  # noqa: BLE001 — surface as warning, fall back to mock
-            warnings.append({"provider": "groq", "message": str(exc)})
+            warnings.append({"provider": model_entry["provider"], "message": str(exc)})
             text = ""
     text = text.strip()
     if not text:

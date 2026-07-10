@@ -258,3 +258,12 @@ def test_frontend_wires_local_barge_in_audio_behavior():
     assert "evaluateLocalBargeIn" in app_js
     assert "VoiceAudioBehavior.pcmLevelFromArrayBuffer" in app_js
     assert "VoiceAudioBehavior.shouldTriggerLocalBargeIn" in app_js
+
+
+def test_pipecat_browser_negotiates_tts_playback_rate_and_pins_client_versions():
+    page = Path("frontend/pipecat.html").read_text(encoding="utf-8")
+
+    assert "@pipecat-ai/client-js@1.12.0" in page
+    assert "@pipecat-ai/websocket-transport@1.7.0" in page
+    assert 'fetch("/health")' in page
+    assert "new WebSocketTransport({ playerSampleRate })" in page

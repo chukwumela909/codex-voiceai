@@ -1,3 +1,6 @@
+from app.conversation_flow import inject_turn_guidance
+
+
 INTENT_INFERENCE_INSTRUCTION = (
     "The latest user message may contain speech-to-text errors. "
     "Infer the user's likely intent from recent conversation context. "
@@ -32,6 +35,9 @@ def agent_transcript_with_context(
     *,
     memory_block: str = "",
     intent_enabled: bool = True,
+    conversation_flow_enabled: bool = False,
+    character_name: str = "the character",
+    private_context: str = "",
 ) -> list[dict[str, str]]:
     """Assemble the messages sent to the agent: an optional leading memory
     system message, then the (optionally intent-inferred) transcript.
@@ -39,11 +45,17 @@ def agent_transcript_with_context(
     Composes the existing intent-inference transform so memory is just one more
     system message at the same seam, rather than a second injection path.
     """
-    base = agent_transcript_with_intent_inference(transcript, enabled=intent_enabled)
+    inferred = agent_transcript_with_intent_inference(transcript, enabled=intent_enabled)
+    directed = inject_turn_guidance(
+        inferred,
+        character_name=character_name,
+        enabled=conversation_flow_enabled,
+        private_context=private_context,
+    )
     block = (memory_block or "").strip()
     if block:
-        return [{"role": "system", "content": block}, *base]
-    return base
+        return [{"role": "system", "content": block}, *directed]
+    return directed
 
 
 def _copy_turn(turn: dict[str, str]) -> dict[str, str]:

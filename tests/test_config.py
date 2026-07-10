@@ -160,8 +160,14 @@ def test_intent_inference_public_config_defaults_and_overrides(monkeypatch):
     monkeypatch.setenv("VOICE_AGENT_INTENT_INFERENCE_ENABLED", "false")
     overridden = Settings(_env_file=None).public_config_status()
 
-    assert defaults["conversation"] == {"intent_inference_enabled": True}
-    assert overridden["conversation"] == {"intent_inference_enabled": False}
+    assert defaults["conversation"] == {
+        "intent_inference_enabled": True,
+        "flow_direction_enabled": True,
+    }
+    assert overridden["conversation"] == {
+        "intent_inference_enabled": False,
+        "flow_direction_enabled": True,
+    }
 
 
 def test_elevenlabs_voice_settings_reported_in_public_config(monkeypatch):

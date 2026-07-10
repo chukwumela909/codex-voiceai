@@ -16,8 +16,9 @@ from app.memory import build_manager
 from app.deepgram import DeepgramStreamingTranscriber
 from app.events import event
 from app.exceptions import ClientConnectionClosed
-from app.characters import Character, build_system_prompt, get_character
+from app.characters import Character, build_relevant_canon, build_system_prompt, get_character
 from app.groq_agent import GroqStreamingAgent, pop_speakable_chunks
+from app.llm_models import resolve_chat_target
 from app.proactive import (
     TRIGGER_CONTEXTUAL_FOLLOW_UP,
     TRIGGER_SILENCE_NUDGE,
@@ -27,6 +28,7 @@ from app.proactive import (
     ProactivePolicyConfig,
 )
 from app.speech_director import strip_markup_for_tts_detailed
+from app.turn_taking import is_explicit_interrupt, is_short_backchannel
 
 SendEvent = Callable[[dict], Awaitable[None]]
 RECENT_CONTEXT_TURN_LIMIT = 8
@@ -61,6 +63,7 @@ class MockConversationSession:
         self.audio_config: dict | None = None
         self.transcriber: DeepgramStreamingTranscriber | None = None
         self.agent: GroqStreamingAgent | None = None
+        self.agent_provider = "groq"
         self.character: Character = get_character(getattr(settings, "default_character_id", None))
         self.synthesizer: ElevenLabsStreamingTTS | None = None
         self.proactive_config = ProactivePolicyConfig.from_settings(settings)
@@ -541,7 +544,7 @@ class MockConversationSession:
     def _should_use_live_proactive_agent(self, trigger_reason: str) -> bool:
         return bool(
             self.settings.normalized_mode == "live"
-            and self.settings.groq_api_key
+            and self._has_usable_llm_config()
             and trigger_reason in {TRIGGER_STARTUP_GREETING, TRIGGER_CONTEXTUAL_FOLLOW_UP, TRIGGER_SILENCE_NUDGE}
         )
 
@@ -713,7 +716,12 @@ class MockConversationSession:
             event(
                 "pipeline.stage",
                 self.session_id,
-                {"stage": "llm_streaming", "provider": "groq" if self.settings.normalized_mode == "live" else "mock"},
+                {
+                    "stage": "llm_streaming",
+                    "provider": self._llm_provider_name()
+                    if self.settings.normalized_mode == "live"
+                    else "mock",
+                },
             )
         )
         self.transcript.append({"role": "user", "content": user_text})
@@ -721,7 +729,7 @@ class MockConversationSession:
         speech_already_streamed = False
         if (
             self.settings.normalized_mode == "live"
-            and self.settings.groq_api_key
+            and self._has_usable_llm_config()
             and self._has_usable_elevenlabs_config()
             and self._uses_default_live_agent_response()
         ):
@@ -740,7 +748,12 @@ class MockConversationSession:
             event(
                 "pipeline.stage",
                 self.session_id,
-                {"stage": "llm_done", "provider": "groq" if self.settings.normalized_mode == "live" else "mock"},
+                {
+                    "stage": "llm_done",
+                    "provider": self._llm_provider_name()
+                    if self.settings.normalized_mode == "live"
+                    else "mock",
+                },
             )
         )
         if not speech_already_streamed:
@@ -840,7 +853,7 @@ class MockConversationSession:
                     self.session_id,
                     {
                         "stage": "llm_streaming",
-                        "provider": "groq" if self.settings.groq_api_key else "scripted",
+                        "provider": self._llm_provider_name(),
                         **metadata,
                     },
                 )
@@ -860,7 +873,7 @@ class MockConversationSession:
                     self.session_id,
                     {
                         "stage": "llm_done",
-                        "provider": "groq" if self.settings.groq_api_key else "scripted",
+                        "provider": self._llm_provider_name(),
                         **metadata,
                     },
                 )
@@ -1308,12 +1321,28 @@ class MockConversationSession:
     def _ensure_agent(self) -> None:
         if self.agent is not None:
             return
+        target = resolve_chat_target(self.settings)
+        if not target["api_key"]:
+            raise RuntimeError(f"No API key is configured for {target['provider']}.")
+        self.agent_provider = target["provider"]
         self.agent = GroqStreamingAgent(
-            api_key=self.settings.groq_api_key,
-            model=self.settings.groq_model,
+            api_key=target["api_key"],
+            model=target["model"],
             persona=build_system_prompt(self.character),
             temperature=self.settings.groq_temperature,
+            max_tokens=getattr(self.settings, "groq_max_tokens", 320),
+            reasoning_effort=getattr(self.settings, "groq_reasoning_effort", "low"),
+            endpoint_url=target["endpoint_url"],
         )
+
+    def _has_usable_llm_config(self) -> bool:
+        return bool(resolve_chat_target(self.settings)["api_key"])
+
+    def _llm_provider_name(self) -> str:
+        if self.agent is not None:
+            return self.agent_provider
+        target = resolve_chat_target(self.settings)
+        return target["provider"] if target["api_key"] else "scripted"
 
     def set_character(self, character_id: str) -> Character:
         self.character = get_character(character_id)
@@ -1332,6 +1361,12 @@ class MockConversationSession:
             windowed,
             memory_block=memory_block,
             intent_enabled=enabled,
+            conversation_flow_enabled=(
+                getattr(self.settings, "conversation_flow_enabled", True)
+                and self.character.conversation_mode == "social"
+            ),
+            character_name=self.character.name,
+            private_context=build_relevant_canon(self.character, windowed),
         )
         injected_intent = enabled and agent_transcript_with_intent_inference(windowed, enabled=enabled) != windowed
         if injected_intent or memory_block:
@@ -1341,7 +1376,7 @@ class MockConversationSession:
                     self.session_id,
                     {
                         "stage": "llm_context",
-                        "provider": "groq",
+                        "provider": self._llm_provider_name(),
                         "intent_inference": injected_intent,
                         "memory_injected": bool(memory_block),
                         "memories_used": memories_used,
@@ -1461,8 +1496,10 @@ class MockConversationSession:
             except Exception as exc:
                 if self.closed:
                     raise
-                await self.send_provider_error("groq", str(exc), metadata=metadata)
-                fallback = "I heard you, but Groq did not return a response. Check the server logs and API key."
+                await self.send_provider_error(
+                    self._llm_provider_name(), str(exc), metadata=metadata
+                )
+                fallback = "Hang on—lost my train of thought for a second there."
                 full_response = fallback
                 chunks = split_mock_response(fallback)
                 emitted_text = await self._emit_agent_text_chunks(
@@ -1515,8 +1552,8 @@ class MockConversationSession:
         return full_response.strip()
 
     async def _stream_live_agent_response(self, response_id: str) -> str:
-        if not self.settings.groq_api_key:
-            message = "I can hear you now, but GROQ_API_KEY is missing so my real response engine is not connected yet."
+        if not self._has_usable_llm_config():
+            message = "Hang on—I'm having trouble getting the words out for a second."
             await self._emit_agent_text_chunks(response_id, split_mock_response(message))
             return message
 
@@ -1542,8 +1579,8 @@ class MockConversationSession:
         except Exception as exc:
             if self.closed:
                 raise
-            await self.send_provider_error("groq", str(exc))
-            message = "I heard you, but Groq did not return a response. Check the server logs and API key."
+            await self.send_provider_error(self._llm_provider_name(), str(exc))
+            message = "Hang on—lost my train of thought for a second there."
             await self._emit_agent_text_chunks(response_id, split_mock_response(message))
             return message
 
@@ -1552,8 +1589,12 @@ class MockConversationSession:
 
     async def _stream_live_proactive_response(self, response_id: str, *, metadata: dict) -> str:
         trigger_reason = str(metadata.get("trigger_reason") or "")
-        if not self.settings.groq_api_key:
-            await self.send_provider_error("groq", "GROQ_API_KEY is missing for live proactive speech.", metadata=metadata)
+        if not self._has_usable_llm_config():
+            await self.send_provider_error(
+                self._llm_provider_name(),
+                "No configured LLM API key is available for live proactive speech.",
+                metadata=metadata,
+            )
             return ""
 
         self._ensure_agent()
@@ -1585,7 +1626,9 @@ class MockConversationSession:
         except Exception as exc:
             if self.closed:
                 raise
-            await self.send_provider_error("groq", str(exc), metadata=metadata)
+            await self.send_provider_error(
+                self._llm_provider_name(), str(exc), metadata=metadata
+            )
             return ""
 
         return ""
@@ -1861,7 +1904,9 @@ def should_interrupt_active_response(
     active_assistant_text: str,
 ) -> bool:
     text = transcript.get("text", "")
-    if not text or not is_meaningful_user_speech(text):
+    if not text or is_short_backchannel(text):
+        return False
+    if not is_explicit_interrupt(text) and not is_meaningful_user_speech(text):
         return False
     if is_duplicate_active_turn(text, active_user_text):
         return False

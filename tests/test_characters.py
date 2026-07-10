@@ -10,6 +10,7 @@ os.environ.setdefault("VOICE_AGENT_MODE", "mock")
 from app import characters as characters_mod
 from app.characters import (
     Character,
+    build_relevant_canon,
     build_system_prompt,
     get_character,
     load_characters,
@@ -55,6 +56,114 @@ def test_build_system_prompt_includes_examples_and_all_rules():
     for rule in char.speaking_style_rules:
         assert rule in prompt
     assert "hey, I'm Demo" in prompt
+
+
+def test_social_character_prompt_rejects_assistant_reflexes_and_directs_fillers():
+    char = Character(
+        id="social",
+        name="Sam",
+        role="friend on a phone call",
+        conversation_mode="social",
+    )
+
+    prompt = build_system_prompt(char)
+
+    assert "social phone call, not a help session" in prompt
+    assert "Do not default to pleasing or agreeing" in prompt
+    assert "Light fillers" in prompt
+    assert "many turns should have none" in prompt
+    assert "Never make the caller carry the exchange" in prompt
+
+
+def test_jimmy_uses_social_mode_while_neutral_character_opts_out():
+    characters = load_characters()
+
+    assert characters["jimmy"].conversation_mode == "social"
+    assert characters["neutral"].conversation_mode == "assistant"
+
+
+def test_relevant_canon_selects_related_private_memory_without_dumping_profile():
+    char = Character(
+        id="social",
+        name="Sam",
+        role="friend",
+        conversation_mode="social",
+        profile_facts=[
+            {"label": "Son", "value": "A 12-year-old son named Max"},
+            {"label": "Work", "value": "Post-trade analyst"},
+        ],
+        stories=[
+            {"title": "The band", "content": "Started drumming as a teenager."},
+        ],
+    )
+
+    memory = build_relevant_canon(
+        char,
+        [{"role": "user", "content": "How old is your kid now?"}],
+    )
+
+    assert "Relevant private memory" in memory
+    assert "12-year-old son" in memory
+    assert "Post-trade analyst" not in memory
+    assert "Started drumming" not in memory
+
+
+def test_relevant_canon_stays_empty_when_topic_does_not_match():
+    char = Character(
+        id="social",
+        name="Sam",
+        role="friend",
+        conversation_mode="social",
+        profile_facts=[{"label": "Work", "value": "Post-trade analyst"}],
+    )
+
+    assert build_relevant_canon(
+        char,
+        [{"role": "user", "content": "That movie ending was kind of strange."}],
+    ) == ""
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I really do not know.",
+        "I had a rough day.",
+        "I went out last night.",
+        "My dad died a few years ago.",
+    ],
+)
+def test_relevant_canon_does_not_mistake_callers_life_for_jimmys(message: str):
+    jimmy = load_characters()["jimmy"]
+
+    assert build_relevant_canon(jimmy, [{"role": "user", "content": message}]) == ""
+
+
+def test_relevant_canon_prefers_direct_fact_over_incidental_story_word():
+    jimmy = load_characters()["jimmy"]
+
+    memory = build_relevant_canon(
+        jimmy,
+        [{"role": "user", "content": "How old are you?"}],
+    )
+
+    assert "Age: 47" in memory
+    assert "Raising his son" not in memory
+
+
+def test_relevant_canon_resolves_pronoun_followup_to_prior_subject():
+    jimmy = load_characters()["jimmy"]
+
+    memory = build_relevant_canon(
+        jimmy,
+        [
+            {"role": "user", "content": "You have a son?"},
+            {"role": "assistant", "content": "Yeah."},
+            {"role": "user", "content": "How old is he?"},
+        ],
+    )
+
+    assert "Son: A 12-year-old son" in memory
+    assert "Age: 47" not in memory
 
 
 def test_get_character_falls_back_to_default():
@@ -113,6 +222,8 @@ def test_put_character_round_trip_preserves_full_fields(tmp_path: Path, monkeypa
     payload = {
         "name": "Zara",
         "role": "fashion assistant",
+        "conversation_mode": "social",
+        "greeting": "Yeah, hello?",
         "tone": ["warm", "playful"],
         "grammar": "casual english",
         "forbidden_phrases": ["as an AI"],
@@ -131,6 +242,8 @@ def test_put_character_round_trip_preserves_full_fields(tmp_path: Path, monkeypa
     saved = next(c for c in listing["characters"] if c["id"] == "zara")
     assert saved["speaking_style_rules"] == ["short sentences", "no jargon", "stay curious"]
     assert saved["example_exchanges"] == payload["example_exchanges"]
+    assert saved["conversation_mode"] == "social"
+    assert saved["greeting"] == "Yeah, hello?"
 
 
 def test_duplicate_character_via_post_leaves_source_intact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

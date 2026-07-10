@@ -244,8 +244,8 @@
     </details>
 
     <script type="module">
-      import { PipecatClient } from "https://cdn.jsdelivr.net/npm/@pipecat-ai/client-js@1/+esm";
-      import { WebSocketTransport } from "https://cdn.jsdelivr.net/npm/@pipecat-ai/websocket-transport@1/+esm";
+      import { PipecatClient } from "https://cdn.jsdelivr.net/npm/@pipecat-ai/client-js@1.12.0/+esm";
+      import { WebSocketTransport } from "https://cdn.jsdelivr.net/npm/@pipecat-ai/websocket-transport@1.7.0/+esm";
 
       // --- DOM ---
       const statusEl = document.getElementById("status");
@@ -590,8 +590,27 @@
       const wsScheme = location.protocol === "https:" ? "wss" : "ws";
       const wsUrl = `${wsScheme}://${location.host}/api/ws`;
 
+      async function resolvePlayerSampleRate() {
+        try {
+          const response = await fetch("/health");
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const health = await response.json();
+          const rate = Number(health?.config?.elevenlabs?.sample_rate);
+          if (Number.isFinite(rate) && rate > 0) return rate;
+        } catch (error) {
+          log("audio sample-rate lookup failed; using 24 kHz:", error?.message ?? error);
+        }
+        return 24000;
+      }
+
+      const playerSampleRate = await resolvePlayerSampleRate();
+      log("audio playback rate:", playerSampleRate);
+
       const client = new PipecatClient({
-        transport: new WebSocketTransport(),
+        // The websocket protocol does not currently preserve per-frame sample
+        // rate metadata, so the player must be created at the exact TTS/output
+        // rate or speech changes pitch and duration.
+        transport: new WebSocketTransport({ playerSampleRate }),
         enableMic: true,
         enableCam: false,
         callbacks: {

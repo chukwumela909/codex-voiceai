@@ -41,7 +41,6 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
 )
-from pipecat.turns.user_start import MinWordsUserTurnStartStrategy
 from pipecat.turns.user_stop import (
     SpeechTimeoutUserTurnStopStrategy,
     TurnAnalyzerUserTurnStopStrategy,
@@ -51,6 +50,7 @@ from pipecat.utils.text.markdown_text_filter import MarkdownTextFilter
 
 from app.ambience import build_room_tone_mixer
 from app.config import Settings
+from app.conversation_flow import inject_turn_guidance
 from app.llm_models import build_llm_service, resolve_model
 from app.pipeline_memory import (
     CALL_SUMMARY_MARKER,
@@ -60,6 +60,7 @@ from app.pipeline_memory import (
     upsert_memory_message,
 )
 from app.tts_filters import SpokenTextFilter
+from app.turn_taking import BackchannelAwareMinWordsUserTurnStartStrategy
 from app.voice_settings import resolve_active_voice_id
 
 logger = logging.getLogger("voice_agent.pipecat")
@@ -186,6 +187,39 @@ class ContextWindowProcessor(FrameProcessor):
         finally:
             self._summarizing = False
 
+
+class ConversationFlowProcessor(FrameProcessor):
+    """Refresh the hidden social-turn brief immediately before each LLM run."""
+
+    def __init__(
+        self,
+        context: LLMContext,
+        *,
+        character,
+        enabled: bool,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._context = context
+        self._character = character
+        self._enabled = enabled
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame) and direction == FrameDirection.DOWNSTREAM:
+            from app.characters import build_relevant_canon
+
+            messages = self._context.get_messages()
+            directed = inject_turn_guidance(
+                messages,
+                character_name=self._character.name,
+                enabled=self._enabled,
+                private_context=build_relevant_canon(self._character, messages),
+            )
+            if directed != messages:
+                self._context.set_messages(directed)
+        await self.push_frame(frame, direction)
+
 IDLE_NUDGE_INSTRUCTION = (
     "The caller has gone quiet. Offer one brief, warm check-in to let them know "
     "you're still on the line. Keep it under 18 words and do not ask why they went silent."
@@ -257,7 +291,11 @@ def build_user_turn_strategies(
     """
     start = None
     if settings.interruption_min_words > 0:
-        start = [MinWordsUserTurnStartStrategy(min_words=settings.interruption_min_words)]
+        start = [
+            BackchannelAwareMinWordsUserTurnStartStrategy(
+                min_words=settings.interruption_min_words
+            )
+        ]
 
     if settings.smart_turn_enabled:
         stop = [
@@ -393,6 +431,14 @@ def build_session_task(
         max_turns=getattr(settings, "llm_context_max_turns", 0),
         summarizer=_rolling_summarizer,
     )
+    conversation_flow = ConversationFlowProcessor(
+        context,
+        character=active_character,
+        enabled=(
+            getattr(settings, "conversation_flow_enabled", True)
+            and active_character.conversation_mode == "social"
+        ),
+    )
 
     pipeline = Pipeline(
         [
@@ -401,6 +447,7 @@ def build_session_task(
             user_aggregator,
             memory_injector,
             context_window,
+            conversation_flow,
             llm,
             tts,
             transport.output(),
@@ -411,6 +458,8 @@ def build_session_task(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
+            audio_in_sample_rate=16000,
+            audio_out_sample_rate=settings.elevenlabs_sample_rate,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
@@ -422,6 +471,8 @@ def build_session_task(
         # a cap a silent caller gets an identical check-in every timeout
         # forever. Allow at most N consecutive nudges (resets once the caller
         # says something) — a real person checks in once, then stays quiet.
+        if not settings.proactive_effective_enabled:
+            return
         max_nudges = max(1, settings.proactive_effective_max_consecutive_prompts)
         if count_trailing_idle_nudges(context.get_messages()) >= max_nudges:
             logger.debug("idle nudge suppressed: %d consecutive already sent", max_nudges)

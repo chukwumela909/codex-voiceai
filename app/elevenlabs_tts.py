@@ -10,10 +10,10 @@ import websockets
 
 VOICES_URL = "https://api.elevenlabs.io/v1/voices"
 
-# Buffer thresholds (in characters) at which ElevenLabs flushes generation. The
-# low first value keeps time-to-first-audio short on short replies; later values
-# grow so longer text is generated in fewer, more prosodically coherent passes.
-DEFAULT_CHUNK_LENGTH_SCHEDULE = [50, 160, 250, 290]
+# ElevenLabs' recommended realtime schedule. A smaller first threshold can shave
+# latency, but it also gives the synthesizer less phrase context and produces
+# more audible prosody seams—the wrong tradeoff for Jimmy's naturalness target.
+DEFAULT_CHUNK_LENGTH_SCHEDULE = [120, 160, 250, 290]
 
 
 class ElevenLabsConnectionError(RuntimeError):

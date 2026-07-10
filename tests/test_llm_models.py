@@ -9,6 +9,7 @@ from app.llm_models import (
     get_active_model,
     model_entry_for,
     resolve_active_model_key,
+    resolve_chat_target,
     resolve_model,
     set_active_model,
 )
@@ -21,13 +22,14 @@ def _settings(**overrides):
         openrouter_api_key="or-key",
         groq_temperature=0.6,
         groq_max_tokens=200,
+        groq_reasoning_effort="low",
     )
     base.update(overrides)
     return SimpleNamespace(**base)
 
 
 def test_default_model_key_falls_back_when_unknown():
-    assert default_model_key(_settings(default_model="nope")) == "groq-llama-3.1-8b"
+    assert default_model_key(_settings(default_model="nope")) == "groq-gpt-oss-20b"
     assert default_model_key(_settings(default_model="or-gpt-4o-mini")) == "or-gpt-4o-mini"
 
 
@@ -78,6 +80,11 @@ def test_build_llm_service_groq_constructs():
     assert type(svc).__name__ == "OpenAILLMService"
 
 
+def test_gpt_oss_presets_are_available_for_quality_and_latency():
+    assert MODELS["groq-gpt-oss-120b"]["model"] == "openai/gpt-oss-120b"
+    assert MODELS["groq-gpt-oss-20b"]["model"] == "openai/gpt-oss-20b"
+
+
 def test_build_llm_service_openrouter_constructs():
     svc = build_llm_service(_settings(), "or-gpt-4o-mini")
     assert type(svc).__name__ == "OpenAILLMService"
@@ -89,6 +96,24 @@ def test_build_llm_service_openrouter_missing_key_falls_back_to_groq():
     settings = _settings(openrouter_api_key=None)
     svc = build_llm_service(settings, "or-gpt-4o-mini")
     assert type(svc).__name__ == "OpenAILLMService"
+
+
+def test_shared_chat_target_resolves_openrouter_and_groq_fallback(tmp_path):
+    direct = resolve_chat_target(
+        _settings(default_model="or-gpt-4o-mini"),
+        directory=tmp_path,
+    )
+    assert direct["provider"] == "openrouter"
+    assert direct["api_key"] == "or-key"
+    assert direct["endpoint_url"].startswith("https://openrouter.ai/")
+
+    fallback = resolve_chat_target(
+        _settings(default_model="or-gpt-4o-mini", openrouter_api_key=None),
+        directory=tmp_path,
+    )
+    assert fallback["provider"] == "groq"
+    assert fallback["model"] == "openai/gpt-oss-20b"
+    assert fallback["fallback_from"] == "or-gpt-4o-mini"
 
 
 def test_build_llm_service_raises_when_no_provider_key_at_all():

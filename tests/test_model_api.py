@@ -28,7 +28,7 @@ def test_list_models_returns_registry_and_active(monkeypatch, isolated_model_dir
     keys = [m["key"] for m in body["models"]]
     assert "groq-llama-3.1-8b" in keys
     assert any(m["provider"] == "openrouter" for m in body["models"])
-    assert body["active"] == "groq-llama-3.1-8b"  # default when nothing persisted
+    assert body["active"] == "groq-gpt-oss-120b"  # default when nothing persisted
     assert body["openrouter_configured"] is False  # no key in a bare env
 
 
@@ -56,7 +56,7 @@ def test_put_empty_model_clears_and_falls_back_to_default(monkeypatch, isolated_
     cleared = client.put("/model", json={"model": ""}).json()
 
     assert cleared["persisted"] is None
-    assert cleared["active"] == "groq-llama-3.1-8b"
+    assert cleared["active"] == "groq-gpt-oss-120b"
 
 
 def test_put_bare_word_model_is_rejected(monkeypatch, isolated_model_dir):

@@ -134,7 +134,12 @@ def test_live_agent_receives_hidden_intent_inference_context_but_events_keep_raw
     assert raw_final["payload"]["text"] == "You're what's up can you hear me now"
     assert captured_transcripts
     assert captured_transcripts[0][-2]["role"] == "system"
-    assert "Infer the user's likely intent" in captured_transcripts[0][-2]["content"]
+    assert captured_transcripts[0][-2]["content"].startswith("[conversation-turn-guidance]")
+    assert any(
+        "Infer the user's likely intent" in turn.get("content", "")
+        for turn in captured_transcripts[0]
+        if turn.get("role") == "system"
+    )
     assert captured_transcripts[0][-1] == {
         "role": "user",
         "content": "You're what's up can you hear me now",
@@ -285,6 +290,34 @@ def proactive_settings(**overrides):
     }
     settings.update(overrides)
     return SimpleNamespace(**settings)
+
+
+def test_classic_agent_uses_shared_selected_model_target(monkeypatch):
+    captured = {}
+
+    class CapturingAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        mock_conversation,
+        "resolve_chat_target",
+        lambda settings: {
+            "provider": "openrouter",
+            "model": "anthropic/claude-haiku-4.5",
+            "api_key": "openrouter-key",
+            "endpoint_url": "https://openrouter.ai/api/v1/chat/completions",
+        },
+    )
+    monkeypatch.setattr(mock_conversation, "GroqStreamingAgent", CapturingAgent)
+
+    session = MockConversationSession("sess_test", lambda event: None, proactive_settings())
+    session._ensure_agent()
+
+    assert session.agent_provider == "openrouter"
+    assert captured["model"] == "anthropic/claude-haiku-4.5"
+    assert captured["api_key"] == "openrouter-key"
+    assert captured["endpoint_url"].startswith("https://openrouter.ai/")
 
 
 async def wait_for_pending_proactive_turn(session):
