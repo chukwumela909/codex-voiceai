@@ -11,13 +11,15 @@ const STORAGE_KEY = "codex.voiceai.tourDone.pipecat";
 
 const connected = () => document.getElementById("connPill")?.dataset.on === "true";
 
+// The tour explains the whole UI first and ends on the one required action:
+// clicking Connect. Once the connection holds, the wrap-up step closes out.
 const steps = [
   {
     id: "welcome",
     title: "Welcome to the voice agent",
     body:
       "This quick tour walks you through starting your first conversation. " +
-      "You'll need a microphone — the browser will ask for access along the way.",
+      "You'll need a microphone — the browser will ask for access at the end.",
     nextLabel: "Start tour",
     advance: { type: "next" },
   },
@@ -51,12 +53,39 @@ const steps = [
     advance: { type: "next" },
   },
   {
+    id: "pills",
+    target: ".pills",
+    title: "Status at a glance",
+    body:
+      "These pills show the connection, your microphone, and whether the agent " +
+      "currently hears you speaking.",
+    advance: { type: "next" },
+  },
+  {
+    id: "transcript",
+    target: ".transcript",
+    title: "Live transcript",
+    body:
+      "Everything you and the agent say will land here — the italic line at the " +
+      "bottom is live partial speech; finished lines appear above it.",
+    advance: { type: "next" },
+  },
+  {
+    id: "disconnect",
+    target: "#disconnect",
+    title: "Ending a session",
+    body:
+      "When you're done talking, click Disconnect. Curious about the plumbing? " +
+      "The Event log below the transcript shows the raw session events.",
+    advance: { type: "next" },
+  },
+  {
     id: "connect",
     target: "#connect",
     title: "Now — click Connect",
     body:
       "This starts a live session. Your browser may ask for microphone access — " +
-      "click Allow. The tour continues once you're connected.",
+      "click Allow. The tour wraps up once you're connected.",
     interactive: true,
     skipIf: connected,
     // The pill can flash "connected" before mic capture fails and flips it to
@@ -71,72 +100,20 @@ const steps = [
     },
   },
   {
-    id: "pills",
-    target: ".pills",
-    title: "Status at a glance",
-    body:
-      "These pills show the connection, your microphone, and whether the agent " +
-      "currently hears you speaking.",
-    advance: { type: "next" },
-    failOn: {
-      target: "#connPill",
-      attr: "data-on",
-      equals: ["false", "error"],
-      message: "Looks like the session disconnected — let's reconnect.",
-      action: { goto: "connect" },
-    },
-  },
-  {
-    id: "speak",
-    target: ".viz",
-    title: "Say something!",
-    body:
-      "Speak into your microphone — try saying hello. The meter reacts to your " +
-      "voice, and the tour moves on once you're heard.",
-    advance: { type: "attr", target: "#speakPill", attr: "data-on", equals: "speaking" },
-    failOn: {
-      target: "#connPill",
-      attr: "data-on",
-      equals: ["false", "error"],
-      message: "Looks like the session disconnected — let's reconnect.",
-      action: { goto: "connect" },
-    },
-    fallbackNextAfterMs: 20000,
-    fallbackNextText: "Having trouble? Check that your mic isn't muted — or press Next to continue.",
-  },
-  {
-    id: "transcript",
-    target: ".transcript",
-    title: "Live transcript",
-    body:
-      "Everything you and the agent say lands here — the italic line at the bottom " +
-      "is live partial speech; finished lines appear above it.",
-    advance: { type: "next" },
-    failOn: {
-      target: "#connPill",
-      attr: "data-on",
-      equals: ["false", "error"],
-      message: "Looks like the session disconnected — let's reconnect.",
-      action: { goto: "connect" },
-    },
-  },
-  {
-    id: "disconnect",
-    target: "#disconnect",
-    title: "Ending a session",
-    body:
-      "When you're done talking, click Disconnect. Curious about the plumbing? " +
-      "The Event log below the transcript shows the raw session events.",
-    advance: { type: "next" },
-  },
-  {
     id: "done",
-    title: "You're all set",
+    title: "You're connected — say hello!",
     body:
-      "That's the whole flow: pick, connect, talk. Replay this tour any time with " +
-      "the “?” button in the corner.",
+      "Just start talking; the agent is listening. Replay this tour any time " +
+      "with the “?” button in the corner.",
     nextLabel: "Finish",
     advance: { type: "next" },
+    failOn: {
+      target: "#connPill",
+      attr: "data-on",
+      equals: ["false", "error"],
+      message: "Looks like the session dropped — let's reconnect.",
+      action: { goto: "connect" },
+    },
   },
 ];
 
