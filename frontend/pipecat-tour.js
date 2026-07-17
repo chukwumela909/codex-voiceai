@@ -35,6 +35,15 @@ const steps = [
     advance: { type: "next" },
   },
   {
+    id: "studio",
+    target: 'a[href="/studio"]',
+    title: "Make your own characters",
+    body:
+      "The Studio is where personalities are built — backstory, speaking style, " +
+      "call greeting. It has its own quick tour the first time you open it.",
+    advance: { type: "next" },
+  },
+  {
     id: "voice",
     target: "#voiceBar",
     title: "Choose a voice",

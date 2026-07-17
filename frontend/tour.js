@@ -15,39 +15,44 @@ const PAD = 8; // spotlight padding around the target rect, px
 const RADIUS = 10; // spotlight corner radius, px
 const ANIM_MS = 180; // hole move animation between steps
 
+/*
+ * Theming: every color reads a --ctour-* custom property with a dark default
+ * (the /pipecat palette). A page with a different theme overrides them on
+ * :root (see studio-tour.js) without touching this file.
+ */
 const CSS = `
 .ctour-overlay { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 60; pointer-events: none; }
-.ctour-overlay .ctour-dim { pointer-events: auto; fill: rgba(12, 10, 9, 0.75); }
-.ctour-overlay .ctour-ring { fill: none; stroke: var(--accent, #a7e5d3); stroke-width: 1.5; pointer-events: none; }
+.ctour-overlay .ctour-dim { pointer-events: auto; fill: var(--ctour-dim, rgba(12, 10, 9, 0.75)); }
+.ctour-overlay .ctour-ring { fill: none; stroke: var(--ctour-accent, #a7e5d3); stroke-width: 1.5; pointer-events: none; }
 .ctour-overlay .ctour-blocker { fill: transparent; pointer-events: auto; }
 .ctour-tooltip {
   position: fixed; z-index: 61; box-sizing: border-box;
   max-width: min(320px, calc(100vw - 32px));
-  background: var(--panel, #1c1917); color: var(--ink, #f5f5f4);
-  border: 1px solid var(--hairline, #292524); border-radius: 10px;
+  background: var(--ctour-panel, #1c1917); color: var(--ctour-ink, #f5f5f4);
+  border: 1px solid var(--ctour-hairline, #292524); border-radius: 10px;
   padding: 0.9rem 1rem; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 .ctour-tooltip:focus { outline: none; }
 .ctour-tooltip[data-place="center"] { left: 50%; top: 50%; transform: translate(-50%, -50%); }
-.ctour-tooltip--pulse { box-shadow: 0 0 0 2px var(--accent, #a7e5d3), 0 12px 32px rgba(0, 0, 0, 0.45); }
-.ctour-count { font-size: 0.72rem; color: var(--muted, #a8a29e); letter-spacing: 0.05em; margin-bottom: 0.35rem; }
+.ctour-tooltip--pulse { box-shadow: 0 0 0 2px var(--ctour-accent, #a7e5d3), 0 12px 32px rgba(0, 0, 0, 0.45); }
+.ctour-count { font-size: 0.72rem; color: var(--ctour-muted, #a8a29e); letter-spacing: 0.05em; margin-bottom: 0.35rem; }
 .ctour-title { margin: 0 0 0.4rem; font-size: 1rem; font-weight: 600; }
-.ctour-body { font-size: 0.86rem; color: var(--muted, #a8a29e); line-height: 1.45; }
-.ctour-note { display: none; font-size: 0.8rem; margin-top: 0.5rem; color: var(--speak, #f4c5a8); line-height: 1.4; }
+.ctour-body { font-size: 0.86rem; color: var(--ctour-muted, #a8a29e); line-height: 1.45; }
+.ctour-note { display: none; font-size: 0.8rem; margin-top: 0.5rem; color: var(--ctour-warn, #f4c5a8); line-height: 1.4; }
 .ctour-note--show { display: block; }
 .ctour-footer { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
-.ctour-skip { background: none; border: none; color: var(--muted, #a8a29e); cursor: pointer; font-size: 0.8rem; padding: 0.25rem 0; font-family: inherit; }
-.ctour-skip:hover { color: var(--ink, #f5f5f4); }
+.ctour-skip { background: none; border: none; color: var(--ctour-muted, #a8a29e); cursor: pointer; font-size: 0.8rem; padding: 0.25rem 0; font-family: inherit; }
+.ctour-skip:hover { color: var(--ctour-ink, #f5f5f4); }
 .ctour-next {
-  margin-left: auto; background: var(--accent, #a7e5d3); color: #0c0a09;
+  margin-left: auto; background: var(--ctour-accent, #a7e5d3); color: var(--ctour-on-accent, #0c0a09);
   border: none; border-radius: 7px; padding: 0.4rem 0.9rem; cursor: pointer;
   font-size: 0.85rem; font-weight: 600; font-family: inherit;
 }
-.ctour-skip:focus-visible, .ctour-next:focus-visible { outline: 2px solid var(--accent, #a7e5d3); outline-offset: 2px; }
+.ctour-skip:focus-visible, .ctour-next:focus-visible { outline: 2px solid var(--ctour-accent, #a7e5d3); outline-offset: 2px; }
 .ctour-arrow {
   position: absolute; width: 10px; height: 10px;
-  background: var(--panel, #1c1917);
-  border-left: 1px solid var(--hairline, #292524); border-top: 1px solid var(--hairline, #292524);
+  background: var(--ctour-panel, #1c1917);
+  border-left: 1px solid var(--ctour-hairline, #292524); border-top: 1px solid var(--ctour-hairline, #292524);
 }
 .ctour-tooltip[data-place="bottom"] .ctour-arrow { top: -6px; transform: rotate(45deg); }
 .ctour-tooltip[data-place="top"] .ctour-arrow { bottom: -6px; transform: rotate(225deg); }
@@ -55,11 +60,11 @@ const CSS = `
 .ctour-replay {
   position: fixed; right: 16px; bottom: 16px; z-index: 55;
   width: 32px; height: 32px; border-radius: 50%;
-  background: var(--panel, #1c1917); color: var(--muted, #a8a29e);
-  border: 1px solid var(--hairline, #292524); cursor: pointer; font-size: 0.95rem; font-family: inherit;
+  background: var(--ctour-panel, #1c1917); color: var(--ctour-muted, #a8a29e);
+  border: 1px solid var(--ctour-hairline, #292524); cursor: pointer; font-size: 0.95rem; font-family: inherit;
 }
-.ctour-replay:hover { color: var(--ink, #f5f5f4); border-color: var(--accent, #a7e5d3); }
-.ctour-replay:focus-visible { outline: 2px solid var(--accent, #a7e5d3); outline-offset: 2px; }
+.ctour-replay:hover { color: var(--ctour-ink, #f5f5f4); border-color: var(--ctour-accent, #a7e5d3); }
+.ctour-replay:focus-visible { outline: 2px solid var(--ctour-accent, #a7e5d3); outline-offset: 2px; }
 `;
 
 function ensureStyle() {
