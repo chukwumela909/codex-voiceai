@@ -189,7 +189,7 @@
       <a class="linkbtn" href="/classic">Classic UI</a>
     </div>
 
-    <div class="controls voicebar">
+    <div class="controls voicebar" id="voiceBar">
       <span class="voicelabel">Voice</span>
       <select id="voiceSelect" title="ElevenLabs voice">
         <option value="">env default</option>
@@ -199,7 +199,7 @@
       <span class="voicestatus" id="voiceStatus"></span>
     </div>
 
-    <div class="controls voicebar">
+    <div class="controls voicebar" id="modelBar">
       <span class="voicelabel">Model</span>
       <select id="modelSelect" title="LLM presets (Groq / OpenRouter)">
         <option value="">loading…</option>
@@ -754,5 +754,6 @@
         try { await client.disconnect(); } catch (e) { log("disconnect error:", e?.message ?? e); }
       });
     </script>
+    <script type="module" src="/static/pipecat-tour.js"></script>
   </body>
 </html>
