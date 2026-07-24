@@ -53,7 +53,9 @@
       }
       select:disabled { opacity: 0.45; cursor: not-allowed; }
 
-      input[type="text"] {
+      input[type="text"],
+      input[type="tel"],
+      input[type="password"] {
         font: inherit;
         padding: 0.5rem 0.75rem;
         background: var(--panel);
@@ -62,7 +64,7 @@
         border-radius: 8px;
         min-width: 220px;
       }
-      input[type="text"]::placeholder { color: var(--muted); }
+      input::placeholder { color: var(--muted); }
       .voicebar { align-items: center; }
       .voicelabel {
         font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
@@ -170,6 +172,25 @@
       }
       .transcript__empty { color: var(--muted); font-style: italic; }
 
+      .outbound {
+        background: var(--panel);
+        border: 1px solid var(--hairline);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 1rem;
+      }
+      .outbound__head {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .outbound__hint, .outbound__status { color: var(--muted); font-size: 12px; }
+      .outbound__hint { margin: 0 0 10px; }
+      .outbound__status[data-ok="true"] { color: var(--accent); }
+      .outbound__status[data-ok="error"] { color: var(--error); }
+
       details { background: var(--panel); border: 1px solid var(--hairline); border-radius: 8px; padding: 0 12px; }
       details summary { cursor: pointer; padding: 10px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
       #status { margin: 0 0 12px; font-family: ui-monospace, monospace; white-space: pre-wrap; font-size: 12px; color: var(--muted); max-height: 200px; overflow-y: auto; }
@@ -209,6 +230,25 @@
       <button id="modelSave">Save model</button>
       <span class="voicestatus" id="modelStatus"></span>
     </div>
+
+    <section class="outbound" aria-labelledby="outboundHeading">
+      <div class="outbound__head" id="outboundHeading">Outbound phone call</div>
+      <p class="outbound__hint">
+        Calls use the character, voice, and model selected above. Enter the number in international format.
+      </p>
+      <div class="controls">
+        <input type="tel" id="outboundPhone" autocomplete="tel" placeholder="+2348012345678" />
+        <input
+          type="password"
+          id="outboundToken"
+          autocomplete="off"
+          placeholder="outbound access token"
+        />
+        <button id="outboundCall">Call</button>
+        <button id="outboundHangup" disabled>End call</button>
+      </div>
+      <div class="outbound__status" id="outboundStatus">idle</div>
+    </section>
 
     <div class="pills">
       <span class="pill" id="connPill" data-on="false">
@@ -273,6 +313,11 @@
       const orModels = document.getElementById("orModels");
       const modelSave = document.getElementById("modelSave");
       const modelStatus = document.getElementById("modelStatus");
+      const outboundPhone = document.getElementById("outboundPhone");
+      const outboundToken = document.getElementById("outboundToken");
+      const outboundCallBtn = document.getElementById("outboundCall");
+      const outboundHangupBtn = document.getElementById("outboundHangup");
+      const outboundStatus = document.getElementById("outboundStatus");
 
       // --- Log ---
       function log(...args) {
@@ -583,6 +628,114 @@
           setModelStatus(`save failed: ${e?.message ?? e}`, "error");
         } finally {
           modelSave.disabled = false;
+        }
+      });
+
+      // --- Outbound Twilio calls ---
+      const terminalCallStatuses = new Set([
+        "busy", "canceled", "completed", "failed", "no-answer",
+      ]);
+      let activeOutboundCallId = null;
+      let outboundPollTimer = null;
+
+      function setOutboundStatus(text, ok = "") {
+        outboundStatus.textContent = text || "";
+        outboundStatus.dataset.ok = ok;
+      }
+
+      function outboundHeaders() {
+        return {
+          "Authorization": `Bearer ${outboundToken.value}`,
+          "Content-Type": "application/json",
+        };
+      }
+
+      async function outboundError(response) {
+        const body = await response.json().catch(() => ({}));
+        return body.detail || `HTTP ${response.status}`;
+      }
+
+      function stopOutboundPolling() {
+        if (outboundPollTimer) clearTimeout(outboundPollTimer);
+        outboundPollTimer = null;
+      }
+
+      function renderOutboundCall(call) {
+        const terminal = terminalCallStatuses.has(call.status);
+        const ok = call.status === "failed" ? "error" : (terminal ? "true" : "");
+        setOutboundStatus(
+          `${call.to} · ${call.status}${call.error ? ` · ${call.error}` : ""}`,
+          ok,
+        );
+        outboundCallBtn.disabled = !terminal;
+        outboundHangupBtn.disabled = terminal;
+        if (terminal) {
+          activeOutboundCallId = null;
+          stopOutboundPolling();
+        }
+      }
+
+      async function pollOutboundCall() {
+        if (!activeOutboundCallId) return;
+        try {
+          const response = await fetch(`/api/outbound-calls/${encodeURIComponent(activeOutboundCallId)}`, {
+            headers: outboundHeaders(),
+          });
+          if (!response.ok) throw new Error(await outboundError(response));
+          renderOutboundCall(await response.json());
+        } catch (error) {
+          setOutboundStatus(`status check failed: ${error?.message ?? error}`, "error");
+        }
+        if (activeOutboundCallId) {
+          outboundPollTimer = setTimeout(pollOutboundCall, 1500);
+        }
+      }
+
+      outboundCallBtn.addEventListener("click", async () => {
+        const to = outboundPhone.value.trim();
+        const accessToken = outboundToken.value;
+        if (!to || !accessToken) {
+          setOutboundStatus("phone number and outbound access token are required", "error");
+          return;
+        }
+        outboundCallBtn.disabled = true;
+        setOutboundStatus("creating call…");
+        try {
+          const response = await fetch("/api/outbound-calls", {
+            method: "POST",
+            headers: outboundHeaders(),
+            body: JSON.stringify({
+              to,
+              character_id: characterSelect.value || null,
+              voice_id: chosenVoice() || null,
+              model_id: chosenModel() || null,
+            }),
+          });
+          if (!response.ok) throw new Error(await outboundError(response));
+          const call = await response.json();
+          activeOutboundCallId = call.id;
+          renderOutboundCall(call);
+          if (activeOutboundCallId) pollOutboundCall();
+        } catch (error) {
+          outboundCallBtn.disabled = false;
+          setOutboundStatus(`call failed: ${error?.message ?? error}`, "error");
+        }
+      });
+
+      outboundHangupBtn.addEventListener("click", async () => {
+        if (!activeOutboundCallId) return;
+        outboundHangupBtn.disabled = true;
+        setOutboundStatus("ending call…");
+        try {
+          const response = await fetch(
+            `/api/outbound-calls/${encodeURIComponent(activeOutboundCallId)}/hangup`,
+            { method: "POST", headers: outboundHeaders() },
+          );
+          if (!response.ok) throw new Error(await outboundError(response));
+          renderOutboundCall(await response.json());
+        } catch (error) {
+          outboundHangupBtn.disabled = false;
+          setOutboundStatus(`hangup failed: ${error?.message ?? error}`, "error");
         }
       });
 

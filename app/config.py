@@ -95,6 +95,11 @@ class Settings(BaseSettings):
     elevenlabs_connect_retries: int = Field(default=1, ge=0, alias="ELEVENLABS_CONNECT_RETRIES")
     twilio_account_sid: str | None = Field(default=None, alias="TWILIO_ACCOUNT_SID")
     twilio_auth_token: str | None = Field(default=None, alias="TWILIO_AUTH_TOKEN")
+    twilio_from_number: str | None = Field(default=None, alias="TWILIO_FROM_NUMBER")
+    outbound_access_token: str | None = Field(
+        default=None,
+        alias="VOICE_AGENT_OUTBOUND_ACCESS_TOKEN",
+    )
     public_host: str | None = Field(default=None, alias="PUBLIC_HOST")
     persona: str = Field(
         default=(
@@ -321,6 +326,7 @@ class Settings(BaseSettings):
     def public_config_status(self) -> dict:
         missing = self.missing_live_keys() if self.normalized_mode == "live" else []
         invalid = self.invalid_live_keys() if self.normalized_mode == "live" else []
+        llm_status = self._llm_status()
         return {
             "mode": self.normalized_mode,
             "live_ready": not missing and not invalid,
@@ -337,8 +343,17 @@ class Settings(BaseSettings):
             },
             "providers": {
                 "stt": "deepgram",
-                "llm": "groq",
+                "llm": llm_status["provider"],
                 "tts": "elevenlabs",
+            },
+            "outbound_calling": {
+                "configured": bool(
+                    self.twilio_account_sid
+                    and self.twilio_auth_token
+                    and self.twilio_from_number
+                    and self.outbound_access_token
+                    and self.public_host
+                ),
             },
             "audio": {
                 "input_gain": self.input_gain,
@@ -347,7 +362,7 @@ class Settings(BaseSettings):
                 "intent_inference_enabled": self.intent_inference_enabled,
                 "flow_direction_enabled": self.conversation_flow_enabled,
             },
-            "llm": self._llm_status(),
+            "llm": llm_status,
             "memory": {
                 "configured": self.normalized_memory_enabled,
                 "enabled": self.memory_effective_enabled,

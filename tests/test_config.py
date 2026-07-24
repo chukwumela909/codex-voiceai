@@ -57,6 +57,30 @@ def test_public_config_status_never_exposes_secret_values(monkeypatch):
     assert voice_secret not in rendered
 
 
+def test_public_config_status_reports_resolved_llm_provider(monkeypatch):
+    monkeypatch.setenv("DEFAULT_MODEL", "or-claude-haiku-4.5")
+
+    status = Settings(_env_file=None).public_config_status()
+
+    assert status["providers"]["llm"] == "openrouter"
+    assert status["llm"]["provider"] == "openrouter"
+
+
+def test_public_config_status_reports_outbound_readiness_without_secrets(monkeypatch):
+    token = "outbound-super-secret"
+    monkeypatch.setenv("TWILIO_ACCOUNT_SID", "AC123")
+    monkeypatch.setenv("TWILIO_AUTH_TOKEN", "twilio-secret")
+    monkeypatch.setenv("TWILIO_FROM_NUMBER", "+15551234567")
+    monkeypatch.setenv("VOICE_AGENT_OUTBOUND_ACCESS_TOKEN", token)
+    monkeypatch.setenv("PUBLIC_HOST", "voice.example.com")
+
+    status = Settings(_env_file=None).public_config_status()
+
+    assert status["outbound_calling"]["configured"] is True
+    assert token not in str(status)
+    assert "twilio-secret" not in str(status)
+
+
 def test_elevenlabs_voice_id_trims_surrounding_quotes_and_whitespace(monkeypatch):
     voice_id = "21m00Tcm4TlvDq8ikWAM"
     monkeypatch.setenv("VOICE_AGENT_MODE", "live")

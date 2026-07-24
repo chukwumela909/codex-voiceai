@@ -1,6 +1,9 @@
 import asyncio
 import json
 import logging
+import re
+import secrets
+from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,10 +32,43 @@ from app.llm_models import (
     set_active_model,
 )
 from fastapi import HTTPException
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
 
 settings = get_settings()
+
+E164_PATTERN = re.compile(r"^\+[1-9]\d{7,14}$")
+
+
+class OutboundCallRequest(BaseModel):
+    to: str
+    character_id: str | None = None
+    voice_id: str | None = None
+    model_id: str | None = None
+
+    @field_validator("to")
+    @classmethod
+    def validate_to_number(cls, value: str) -> str:
+        normalized = (
+            value.strip()
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("(", "")
+            .replace(")", "")
+        )
+        if not E164_PATTERN.fullmatch(normalized):
+            raise ValueError("Use an E.164 phone number such as +2348012345678.")
+        return normalized
+
+    @field_validator("character_id", "voice_id", "model_id")
+    @classmethod
+    def normalize_optional_selection(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if len(normalized) > 256:
+            raise ValueError("Call selection values must be at most 256 characters.")
+        return normalized or None
 
 
 class SessionIdFilter(logging.Filter):
@@ -230,6 +266,140 @@ async def twiml(request: Request) -> Response:
     return Response(content=xml, media_type="text/xml")
 
 
+def _require_outbound_access(request: Request) -> None:
+    configured = settings.outbound_access_token
+    if not configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Outbound calling is disabled: VOICE_AGENT_OUTBOUND_ACCESS_TOKEN is not configured.",
+        )
+    authorization = request.headers.get("authorization", "")
+    scheme, _, supplied = authorization.partition(" ")
+    if (
+        scheme.lower() != "bearer"
+        or not supplied
+        or not secrets.compare_digest(configured, supplied)
+    ):
+        raise HTTPException(status_code=401, detail="Invalid outbound access token.")
+
+
+def _require_outbound_configuration() -> None:
+    missing = [
+        name
+        for name, value in (
+            ("TWILIO_ACCOUNT_SID", settings.twilio_account_sid),
+            ("TWILIO_AUTH_TOKEN", settings.twilio_auth_token),
+            ("TWILIO_FROM_NUMBER", settings.twilio_from_number),
+            ("PUBLIC_HOST", settings.public_host),
+        )
+        if not value
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Outbound calling is not configured: missing {', '.join(missing)}.",
+        )
+
+
+@app.post("/api/outbound-calls", status_code=201)
+async def create_outbound_call(payload: OutboundCallRequest, request: Request) -> dict:
+    """Place an AI-agent call from the configured Twilio number."""
+    _require_outbound_access(request)
+    _require_outbound_configuration()
+
+    if payload.character_id and payload.character_id not in load_characters():
+        raise HTTPException(status_code=400, detail="Unknown character id.")
+    if payload.model_id:
+        from app.llm_models import model_entry_for
+
+        if not model_entry_for(payload.model_id, settings):
+            raise HTTPException(status_code=400, detail="Unknown model id.")
+
+    from app.outbound_calls import outbound_call_store
+    from app.twilio_outbound import place_outbound_call
+
+    call = outbound_call_store.create(
+        to_number=payload.to,
+        character_id=payload.character_id,
+        voice_id=payload.voice_id,
+        model_id=payload.model_id,
+    )
+    try:
+        twilio_call = await asyncio.to_thread(place_outbound_call, call, settings)
+    except Exception:  # noqa: BLE001 — provider details stay server-side
+        outbound_call_store.update_status(
+            call.id,
+            "failed",
+            error="Twilio could not create the call.",
+        )
+        logger.exception("outbound Twilio call creation failed")
+        raise HTTPException(status_code=502, detail="Twilio could not create the call.") from None
+
+    outbound_call_store.attach_twilio_call(call.id, twilio_call.sid)
+    log_info("outbound Twilio call queued", call_id=call.id)
+    return call.public()
+
+
+@app.get("/api/outbound-calls/{call_id}")
+async def get_outbound_call(call_id: str, request: Request) -> dict:
+    _require_outbound_access(request)
+    from app.outbound_calls import outbound_call_store
+
+    call = outbound_call_store.get(call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Outbound call not found.")
+    return call.public()
+
+
+@app.post("/api/outbound-calls/{call_id}/hangup")
+async def hang_up_outbound_call(call_id: str, request: Request) -> dict:
+    _require_outbound_access(request)
+    _require_outbound_configuration()
+    from app.outbound_calls import TERMINAL_CALL_STATUSES, outbound_call_store
+    from app.twilio_outbound import end_outbound_call
+
+    call = outbound_call_store.get(call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Outbound call not found.")
+    if call.status in TERMINAL_CALL_STATUSES:
+        return call.public()
+    try:
+        twilio_call = await asyncio.to_thread(end_outbound_call, call, settings)
+    except Exception:  # noqa: BLE001 — provider details stay server-side
+        logger.exception("outbound Twilio call hangup failed", extra={"call_id": call.id})
+        raise HTTPException(status_code=502, detail="Twilio could not end the call.") from None
+    final_status = getattr(twilio_call, "status", None) or (
+        "canceled" if call.status in {"creating", "queued", "initiated", "ringing"} else "completed"
+    )
+    outbound_call_store.update_status(call.id, final_status, call_sid=call.call_sid)
+    return call.public()
+
+
+@app.post("/twilio/call-status/{call_id}", status_code=204)
+async def twilio_call_status(call_id: str, request: Request) -> Response:
+    """Receive signed lifecycle callbacks for an outbound Twilio call."""
+    from app.outbound_calls import outbound_call_store
+    from app.twilio_outbound import callback_url_for_request, validate_twilio_request
+
+    body = (await request.body()).decode("utf-8")
+    params = dict(parse_qsl(body, keep_blank_values=True))
+    is_valid = validate_twilio_request(
+        url=callback_url_for_request(request, settings),
+        params=params,
+        signature=request.headers.get("x-twilio-signature"),
+        auth_token=settings.twilio_auth_token,
+    )
+    if not is_valid:
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature.")
+
+    status = params.get("CallStatus", "").strip().lower()
+    call_sid = params.get("CallSid", "").strip()
+    if status and call_sid:
+        outbound_call_store.update_status(call_id, status, call_sid=call_sid)
+        log_info("outbound Twilio status", call_id=call_id, call_status=status)
+    return Response(status_code=204)
+
+
 @app.websocket("/api/twilio-ws")
 async def twilio_ws(websocket: WebSocket) -> None:
     """Twilio Media Streams transport for the Pipecat pipeline.
@@ -243,19 +413,63 @@ async def twilio_ws(websocket: WebSocket) -> None:
 
     start_iter = websocket.iter_text()
     try:
-        await start_iter.__anext__()  # {"event": "connected", ...}
-        call_data = json.loads(await start_iter.__anext__())  # {"event": "start", ...}
-    except (StopAsyncIteration, WebSocketDisconnect):
+        call_data = None
+        for _ in range(5):
+            raw_message = await asyncio.wait_for(start_iter.__anext__(), timeout=10)
+            candidate = json.loads(raw_message)
+            if candidate.get("event") == "start":
+                call_data = candidate
+                break
+        if not call_data:
+            raise ValueError("Twilio did not send a start event.")
+        start_data = call_data["start"]
+        stream_sid = start_data["streamSid"]
+        call_sid = start_data["callSid"]
+    except (
+        KeyError,
+        ValueError,
+        json.JSONDecodeError,
+        StopAsyncIteration,
+        TimeoutError,
+        WebSocketDisconnect,
+    ):
         log_info("twilio ws closed before start", session_id=session_id)
+        await websocket.close(code=1008)
         return
-    stream_sid = call_data["start"]["streamSid"]
-    call_sid = call_data["start"]["callSid"]
+
+    character_id = voice_id = model_id = None
+    custom_parameters = start_data.get("customParameters") or {}
+    outbound_call_id = str(custom_parameters.get("call_id", "") or "")
+    if outbound_call_id:
+        from app.outbound_calls import outbound_call_store
+
+        outbound_call = outbound_call_store.authenticate_stream(
+            call_id=outbound_call_id,
+            stream_token=str(custom_parameters.get("stream_token", "") or ""),
+            call_sid=call_sid,
+        )
+        if not outbound_call:
+            log_info("rejected invalid outbound media stream", session_id=session_id)
+            await websocket.close(code=1008)
+            return
+        character_id = outbound_call.character_id
+        voice_id = outbound_call.voice_id
+        model_id = outbound_call.model_id
+
     log_info("twilio media stream started", session_id=session_id)
 
     from app.pipeline import run_twilio_session
 
     try:
-        await run_twilio_session(websocket, stream_sid, call_sid, settings)
+        await run_twilio_session(
+            websocket,
+            stream_sid,
+            call_sid,
+            settings,
+            character_id=character_id,
+            voice_id=voice_id,
+            model_id=model_id,
+        )
     except WebSocketDisconnect:
         log_info("twilio ws disconnected", session_id=session_id)
     except Exception:

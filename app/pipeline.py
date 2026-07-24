@@ -552,6 +552,9 @@ async def run_twilio_session(
     stream_sid: str,
     call_sid: str,
     settings: Settings,
+    character_id: str | None = None,
+    voice_id: str | None = None,
+    model_id: str | None = None,
 ) -> None:
     """Build and run a Pipecat pipeline against a Twilio Media Streams WebSocket.
 
@@ -587,7 +590,12 @@ async def run_twilio_session(
 
     turn_analyzer = await asyncio.to_thread(create_turn_analyzer, settings)
     task, context, context_window = build_session_task(
-        transport, settings, turn_analyzer=turn_analyzer
+        transport,
+        settings,
+        character_id=character_id,
+        voice_id=voice_id,
+        model_id=model_id,
+        turn_analyzer=turn_analyzer,
     )
     runner = PipelineRunner(handle_sigint=False)
     try:

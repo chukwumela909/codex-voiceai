@@ -85,6 +85,19 @@ Phone-call ambience:
 
 The ambience bed is generated in the browser with Web Audio after microphone permission is granted. It is connected only to local playback, never sent to Deepgram, never mixed into assistant `audio.chunk` events, and ramps down when the mic or session stops.
 
+Outbound calling:
+
+- `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`: Twilio REST credentials
+- `TWILIO_FROM_NUMBER`: Twilio number or verified outgoing caller ID in E.164 format
+- `PUBLIC_HOST`: public hostname without a scheme or path
+- `VOICE_AGENT_OUTBOUND_ACCESS_TOKEN`: strong private token that enables and protects the website dialer
+
+The Pipecat page can place an outbound call using its currently selected character,
+voice, and model. The access token is submitted as a Bearer token and remains only
+in the open page. Twilio call status callbacks update the UI until the call reaches
+a terminal state. The in-process call store assumes one application worker; use a
+shared database or Redis before running multiple workers.
+
 ## Contextual Speech
 
 Live mode preserves raw Deepgram transcripts in `transcript.partial`, `transcript.final`, logs, and stored conversation turns. When `VOICE_AGENT_INTENT_INFERENCE_ENABLED=true`, the model request also receives hidden guidance that the latest user turn may include speech-to-text errors. For a character with `conversation_mode: "social"`, `VOICE_AGENT_CONVERSATION_FLOW_ENABLED=true` also adds a fresh deterministic turn brief immediately before the LLM: match the caller's turn size, avoid consecutive question endings, vary recent openings/fillers, contribute a point of view, and avoid help-desk reflexes. The raw transcript and stored character are unchanged.
@@ -160,10 +173,18 @@ Tuning guidance:
 
 ## Routes
 
-- `GET /`: local browser client
+- `GET /`: redirects to the Pipecat browser client
+- `GET /pipecat`: production Pipecat browser client
+- `GET /classic`: legacy browser client
+- `GET /twiml`: TwiML for inbound Twilio calls
 - `GET /health`: deployment health and safe config status
 - `GET /events`: JSON event contract
-- `WS /ws/browser`: one browser voice session per WebSocket
+- `POST /api/outbound-calls`: create a protected outbound AI-agent call
+- `GET /api/outbound-calls/{call_id}`: read protected outbound call status
+- `POST /api/outbound-calls/{call_id}/hangup`: end a protected outbound call
+- `POST /twilio/call-status/{call_id}`: signed Twilio call-status callback
+- `WS /api/ws`: one Pipecat browser voice session per WebSocket
+- `WS /api/twilio-ws`: Twilio Media Streams WebSocket
 
 ## Health Check
 
